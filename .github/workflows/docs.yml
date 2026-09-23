@@ -1,0 +1,32 @@
+name: Docs                                              # Name of the workflow
+
+on:                                                     # Specifies when it needs to be executed:
+  push:                                                 # - whenever some changes are pushed
+    branches: [main]                                    #   on the main branch;
+  workflow_dispatch:                                    # - manually from the workflow dispatch on GitHub.
+
+jobs:                                                   # Specifies what the workflows actually does: it's a job
+  pages:                                                # called pages
+    runs-on: ubuntu-latest                              # executed on the latest version of Ubuntu (runner).
+
+    environment:                                        # Creates an environment for the job.
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    permissions:                                        # Concedes necessary permissions to the job:
+      contents: read                                    # reading the contents of the repository,
+      pages: write                                      # publishing the documentation (pages) on GitHub
+      id-token: write                                   # and some necessary identification permissions.
+
+    steps:                                              # Defines the steps of the job:
+    - uses: actions/checkout@v4                         # - downloads the code from the repository on the runner;
+    - uses: actions/setup-python@v5                     # - installs python 3.13 on the runner environment;
+      with:
+        python-version: "3.13"
+    - run: python -m pip install --upgrade pip          # - upgrades pip to the latest version;
+    - run: pip install -e ".[docs]"                     # - installs poject optional dependencies for docs;
+
+    - id: deployment                                    # - executes sphinx-notes/pages@v3 which is a GitHub action
+      uses: sphinx-notes/pages@v3                       #   that creates the documentation and publishes it on GitHub
+                                                        #   pages.
+                                                        #   The 'deployment' ID "captures" the output like the page url.

@@ -1,0 +1,32 @@
+name: Run tests
+
+on:                                                       # Activates when
+  push:                                                   # pushed on
+    branches: [ "main" ]                                  # main or
+  pull_request:                                           # during pull requests
+    branches: [ "main" ]                                  # on main.
+
+jobs:                                                     # Creates a job
+  build:                                                  # named build
+    runs-on: ubuntu-22.04                                 # that runs on Ubuntu-22.04.
+    strategy:                                             # The job is run on different configurations
+      fail-fast: false                                    # (even if one fails the others continue)
+      matrix:                                             #
+        python-version: ["3.12", "3.13"]                  # (specify here the different configurations)
+
+    steps:                                                # The job is organized in steps:
+    - uses: actions/checkout@v4                           # - clone the repo on the runner
+    - name: Set up Python ${{ matrix.python-version }}    # - installs the Python version (specified in the matrix)
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install                                       # - installs the module in editable mode
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+    - name: Lint                                          # - static check with ruff
+      run: |
+        ruff check
+    - name: Unit tests                                    # - runs the unit tests
+      run: |
+        pytest
