@@ -1,8 +1,12 @@
 # Backend
 
+#[build-system]
+#requires = ["hatchling"]
+#build-backend = "hatchling.build"
+
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
 
 # Metadata
 
@@ -19,6 +23,8 @@ authors = [
 dependencies = [
   "numpy",
   ]
+
+[tool.setuptools_scm]
 
 # Optional dependencies
 
@@ -45,8 +51,8 @@ Issues = "https://github.com/LorenzoNepi/MLGWSC_proposal/issues"
 
 # version.py file path
 
-[tool.hatch.version]
-path = "src/MLGWSC_proposal/_version.py"
+#[tool.hatch.version]
+#path = "src/MLGWSC_proposal/_version.py"
 
 # ruff configuration
 

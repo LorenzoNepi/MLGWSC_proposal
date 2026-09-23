@@ -1,15 +1,22 @@
 # pylint: disable=invalid-name
 # For the next time: USE A LOWER CASE NAME !!
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("MLGWSC_proposal")
+except PackageNotFoundError:
+    __version__ = "unknown"         # Fallback in case the package was still not installed in venv
+
+"""
+# Previews versioning method
+
 import pathlib
 import subprocess
 
 from ._version import __version__ as __base_version__
 
-
 def _git_suffix():
-    """
-    Function to retrieve git suffix and add '.dirty' if uncommitted changes are present.
-    """
+    # Function to retrieve git suffix and add '.dirty' if uncommitted changes are present.
     cwd = pathlib.Path(__file__).parent
 
     try:
@@ -43,3 +50,4 @@ def _git_suffix():
         return ""
 
 __version__ = f"{__base_version__}{_git_suffix()}"
+"""
