@@ -26,6 +26,7 @@ def cleanup(session: nox.Session) -> None:
         *_ROOT_DIR.rglob(".mypy_cache"),
         *_ROOT_DIR.rglob(".ruff_cache"),
         *_ROOT_DIR.rglob(".pytest_cache"),
+        *_ROOT_DIR.rglob("*.egg-info"),
         _ROOT_DIR / ".nox",
         _DOCS_DIR / "build"
     ]
