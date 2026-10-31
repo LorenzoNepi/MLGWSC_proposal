@@ -22,7 +22,8 @@ authors = [
   ]
 dependencies = [
   "numpy",
-  "h5py"
+  "h5py",
+  "torch"
   ]
 
 [tool.setuptools_scm]
