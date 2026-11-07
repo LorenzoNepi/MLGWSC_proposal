@@ -63,7 +63,7 @@ class DAIN_Layer(nn.Module):
 
         self.eps = 1e-8
 
-    def forward(self, x):
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
         # Expecting  (n_samples, dim,  n_feature_vectors)
 
         # Nothing to normalize

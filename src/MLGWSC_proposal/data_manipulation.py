@@ -131,7 +131,11 @@ def whiten(
     """
 
     # Using a Hann window to reduce border effects
-    hann_window = torch.hann_window(int(interval * 2048), dtype = torch_segmented.dtype, device = device)
+    hann_window = torch.hann_window(
+        int(interval * 2048),
+        dtype = torch_segmented.dtype,
+        device = device
+        )
     torch_segmented = torch_segmented * hann_window
 
     # Transforming the segments to the frequency domain
@@ -145,7 +149,12 @@ def whiten(
 
     # Whitening the data and going back to time domain
     whitened_fourier = fft_segments * inv_asd.unsqueeze(1)
-    torch_whitened = torch.fft.irfft(whitened_fourier, n = int(interval * 2048), dim = 2, norm = "forward")
+    torch_whitened = torch.fft.irfft(
+        whitened_fourier,
+        n = int(interval * 2048),
+        dim = 2,
+        norm = "forward"
+        )
 
     return torch_whitened
 
@@ -155,7 +164,7 @@ def torch_segmentation(
     max_length : float | int = 73728000,
     interval : float | int = 6,
     stride : float | int = 2.5
-):
+) -> None:
     """Divide the strain data into whitened, fixed-length segments.
 
     The raw strain timeseries is segmented using a sliding window of duration `interval`
@@ -366,7 +375,7 @@ def foreground_segmentation(
     interval : float | int = 6,
     stride : float | int = 2.5,
     default_time: float | int = 0.4
-):
+) -> None:
     """Extract, whiten and augment strain segments containing GWs injections.
 
     This function locates injected GWs signals in the foregound timeseries using their
