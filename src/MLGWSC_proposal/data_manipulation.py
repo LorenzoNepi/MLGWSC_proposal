@@ -336,7 +336,7 @@ def get_tc(
         tc_dict_random = {}
         tc_dict_original = {}
 
-        for key in f_fore["H1"].keys():
+        for key in f_fore["H1"]:
             start_time = int(key)
 
             # Compute the segment duration
@@ -353,7 +353,8 @@ def get_tc(
             # of `random_interval` seconds around the actual tc
             if len(original_tc_list) > 0:
                 # Random offsets from the original times
-                random_offsets = np.random.uniform(
+                rng = np.random.default_rng() # For some reason ruff doesn't like np.random.uniform
+                random_offsets = rng.uniform(
                     -random_interval/2, random_interval/2, size = (len(original_tc_list), 5))
                 # shape = (#tc, 5)
                                         # Broadcasting for sum
@@ -456,7 +457,7 @@ def foreground_segmentation(
 
         dset = f_out["whitened"]
 
-        for key in H1.keys():
+        for key in H1:
 
             # Computing the indexes corresponding to the times of coalescence
             tc_list_random = tc_dict_random[key]

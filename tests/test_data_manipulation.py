@@ -1,14 +1,21 @@
+import pathlib
+
 import h5py
+import numpy as np
 import pytest
 import torch
-import pathlib
-import numpy as np
+
 from MLGWSC_proposal.data_manipulation import (
-    explore_data, welch_psd, whiten, get_tc, torch_segmentation, foreground_segmentation
+    explore_data,
+    foreground_segmentation,
+    get_tc,
+    torch_segmentation,
+    welch_psd,
+    whiten,
 )
 
 
-def test_explore_data(tmp_path: pathlib.Path, capsys) -> None:
+def test_explore_data(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     # Creating come temporary test files
     # tmp_path is recognized by pytest. It is used to create a "mock" path
     # in which test data can be saved for the duration of the test.
@@ -94,14 +101,15 @@ def test_get_tc(tmp_path: pathlib.Path) -> None:
 
         for a in range(2048 * 10**3, 2048 * 10**4, 2048 * 10**3):
             # Generating groups and datasets to simulate 1000s segments
-            fore["H1"][str(a)] = np.random.rand(2048 * 1000)
+            rng = np.random.default_rng()
+            fore["H1"][str(a)] = rng.standard_normal(2048 * 1000)
             # Generating a mock injection time between 50s and 950s for each segment
-            tc = a + 50 + np.random.rand() * 900
+            tc = a + 50 + rng.standard_normal() * 900
             tc_list.append(tc)
 
         inj["tc"] = tc_list
 
-        tc_dict_original, tc_dict_random = get_tc(fore_path, inj_path, 200)
+        tc_dict_original, tc_dict_random = get_tc(str(fore_path), str(inj_path), 200)
 
         # Asserting that the original times are correctly saved in a dictionary
         assert len(tc_dict_original.keys()) == 9
@@ -109,7 +117,7 @@ def test_get_tc(tmp_path: pathlib.Path) -> None:
         # Asserting that random times are correctly generetad
         assert all(
             len(tc_dict_original[key]) < len(tc_dict_random[key])
-            for key in tc_dict_original.keys()
+            for key in tc_dict_original
             )
 
         # Asserting that all the generated times are in the correct interval
@@ -126,7 +134,8 @@ def test_torch_segmentation(tmp_path: pathlib.Path) -> None:
     segmented_path = tmp_path / "segmented_background.hdf"
 
     # Creating mock raw data: 10s at 2048 Hz
-    test_strain = np.random.randn(2048 * 10)
+    rng = np.random.default_rng()
+    test_strain = rng.standard_normal(2048 * 10)
 
     # Creating test HDF5 files with the correct expected structure
     with h5py.File(data_path, "w") as f:
@@ -171,7 +180,8 @@ def test_foreground_segmentation(tmp_path: pathlib.Path) -> None:
     segmented_path = tmp_path / "segmented_foreground.hdf5"
 
     # Creating mock raw data: 15s at 2048 Hz
-    test_strain = np.random.randn(15 * 2048)
+    rng = np.random.default_rng()
+    test_strain = rng.standard_normal(15 * 2048)
     start_gps = 1000000000
 
     # Creating mock foreground data
