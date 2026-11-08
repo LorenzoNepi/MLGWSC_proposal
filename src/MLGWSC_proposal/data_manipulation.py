@@ -225,7 +225,8 @@ def torch_segmentation(
             shape = (2, 0, stride_index),
             # None lets us append as many intervals as needed
             maxshape = (2, None, stride_index),
-            chunks = True
+            chunks = True,
+            dtype = "f4"
             )
 
         dset = f_out["whitened"]
@@ -452,7 +453,8 @@ def foreground_segmentation(
             shape = (2, 0, stride_index),
             # None lets us append as many intervals as needed
             maxshape = (2, None, stride_index),
-            chunks = True
+            chunks = True,
+            dtype = "f4"
             )
 
         dset = f_out["whitened"]

@@ -104,7 +104,7 @@ def test_get_tc(tmp_path: pathlib.Path) -> None:
             rng = np.random.default_rng()
             fore["H1"][str(a)] = rng.standard_normal(2048 * 1000)
             # Generating a mock injection time between 50s and 950s for each segment
-            tc = a + 50 + rng.standard_normal() * 900
+            tc = a + 50 + rng.random() * 900
             tc_list.append(tc)
 
         inj["tc"] = tc_list
@@ -256,6 +256,6 @@ def test_segmentation_exceptions(tmp_path: pathlib.Path) -> None:
         foreground_segmentation(
             dummy_path_1, dummy_path_2, dummy_path_3,
             interval=2,
-            stride=0.3,       # Stride is lower than default_time
+            stride=0.25,       # Stride is lower than default_time
             default_time=0.4
         )
