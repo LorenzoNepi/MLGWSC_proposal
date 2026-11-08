@@ -16,6 +16,7 @@ _LINT_DIRS = ("src", "tests")
 
 # Reuse existing virtualenvs by default
 nox.options.reuse_existing_virtualenvs = True
+nox.options.default_venv_backend = "uv"
 
 # Session to cleanup pycache and other temporary files --> nox -s cleanup
 @nox.session(venv_backend="none")
@@ -26,6 +27,7 @@ def cleanup(session: nox.Session) -> None:
         *_ROOT_DIR.rglob(".mypy_cache"),
         *_ROOT_DIR.rglob(".ruff_cache"),
         *_ROOT_DIR.rglob(".pytest_cache"),
+        *_ROOT_DIR.rglob("*.egg-info"),
         _ROOT_DIR / ".nox",
         _DOCS_DIR / "build"
     ]
@@ -53,7 +55,7 @@ def ruff(session: nox.Session) -> None:
 def pylint(session: nox.Session) -> None:
     """Run pylint."""
     session.install("pylint")
-    session.install(".[dev]")
+    session.install("-e", ".[dev]")
     session.run("pylint", *_LINT_DIRS, *session.posargs)
 
 # Session to run mypy --> nox -s mypy
@@ -61,7 +63,7 @@ def pylint(session: nox.Session) -> None:
 def mypy(session: nox.Session) -> None:
     """Run mypy."""
     session.install("mypy")
-    session.install(".[dev]")
+    session.install("-e", ".[dev]")
     session.run("mypy", *_LINT_DIRS, *session.posargs )
 
 # Session to run unit tests --> nox -s test
@@ -70,5 +72,5 @@ def test(session: nox.Session) -> None:
     """Run the unit tests.
     """
     session.install("pytest")
-    session.install(".[dev]")
+    session.install("-e", ".[dev]")
     session.run("pytest", *session.posargs)
