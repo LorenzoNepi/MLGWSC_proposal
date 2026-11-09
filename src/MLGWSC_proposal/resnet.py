@@ -77,7 +77,7 @@ class Block(nn.Module):
             padding = 0
         )
 
-        self.block_norm3 = nn.BatchNorm1d(out_channels_1 * self.dim_expansion)
+        self.block_norm3 = nn.BatchNorm1d(out_channels_1 * dim_expansion)
 
         if stride !=1 or in_channels_1 != out_channels_1 * dim_expansion:
             self.identity_downsample = nn.Sequential(
@@ -115,7 +115,7 @@ class Block(nn.Module):
 
         # Residual skip connection
         if self.identity_downsample is not None:
-            x = self.identity_downsample(x)
+            identity = self.identity_downsample(identity)
         x += identity
         x = self.relu(x)
 
