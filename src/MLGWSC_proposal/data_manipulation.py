@@ -292,15 +292,22 @@ def get_tc(
     foreground_path : str,
     injections_path : str,
     random_interval : int | float
-) -> tuple[dict, dict]:
+) -> tuple[dict, dict, dict]:
     """
     Extract coalescence times (tc) and generate augmented times for each foreground segment.
 
     This function retrieves the actual injection times from the dataset in the injections
-    HDF5 file and returns 2 dictionaries: the first one contains the true tc values
-    for each timeseries in the foreground HDF5 file, while the second one contains 5 augmented
-    tc values per injection, uniformly distributed within a `random_interval` time span around
-    the true tc (used for data augmentation during training).
+    HDF5 file and returns three dictionaries. The first contains the true tc values
+    for each timeseries in the foreground HDF5 file. The second contains 5 augmented
+    tc values per injection, uniformly distributed within a `random_interval` time span
+    around the true tc (used for data augmentation during training). The third contains
+    the approximate SNR values computed as:
+
+    $$SNR = \\frac{1261 \\text{ Mpc}}{D} \\cdot
+    \\left(\\frac{\\mathcal{M}_{c}}{M_{\\odot}}\\right)^{5/7} [0.7 + 0.3 \\cos(2i)]$$
+
+    where $D$ is the distance, $\\mathcal{M}_{c}$ is the chirp mass, and $i$ is the inclination.
+    All these parameters are retrieved directly from the injections HDF5 file.
 
     Parameters
     ----------
@@ -313,11 +320,11 @@ def get_tc(
 
     Returns
     -------
-    tuple[dict, dict]
-        A tuple containing two dictionaries, both having the segment GPS start times
-        as keys.
-        - The first dictionary contains NumPy arrays with the true tc values.
-        - The second dictionary contains NumPy arrays with the randomly generated tc values.
+    tuple[dict, dict, dict]
+        A tuple containing three dictionaries, all using the segment GPS start times as keys:
+        - The first contains NumPy arrays with the true tc values.
+        - The second contains NumPy arrays with the randomly generated tc values.
+        - The third contains NumPy arrays with the approximated SNR for each generated tc.
     """
 
     with (h5py.File(foreground_path, "r") as f_fore,
@@ -334,8 +341,15 @@ def get_tc(
         # Selecting the coalescence times in our foreground data
         # from all the times contained in f_inj["tc"][()] for each segment
         global_tc_list = np.array(f_inj["tc"][()])
+
+        # Selecting the necessary injection parameters to compute the SNR
+        global_dis_list = np.array(f_inj["distance"][()])
+        global_mchirp_list = np.array(f_inj["mchirp"][()])
+        global_i_list = np.array(f_inj["inclination"][()])
+
         tc_dict_random = {}
         tc_dict_original = {}
+        snr_dict = {}
 
         for key in f_fore["H1"]:
             start_time = int(key)
@@ -350,6 +364,14 @@ def get_tc(
 
             original_tc_list = global_tc_list[mask_start & mask_end]
 
+            # Selecting the right injection parameters values to compute the SNR
+            dis_list = global_dis_list[mask_start & mask_end]
+            mchirp_list = global_mchirp_list[mask_start & mask_end]
+            i_list = global_i_list[mask_start & mask_end]
+
+            # Computing the SNR for each injection (approximation)
+            snr_list = (1261 / dis_list) * (mchirp_list)**(5/7) * (0.7 + 0.3 * np.cos(i_list))
+
             # Introducing randomness for efficient training: 5 random times in an interval
             # of `random_interval` seconds around the actual tc
             if len(original_tc_list) > 0:
@@ -362,20 +384,33 @@ def get_tc(
                 new_tc_list = original_tc_list[:, None] + random_offsets
                 new_tc_list = new_tc_list.flatten()
 
+                # Replicating the SNR 5 times to match the generated tc array, then flattening
+                # Using np.repeat repeats each element consecutively (e.g., [a, a, a, b, b, b])
+                new_snr_list = np.repeat(snr_list, 5)
+
                 # Checking again if the generated times are still in the right interval
                 mask_start = new_tc_list >= (start_time + padding_start)
                 mask_end = new_tc_list <= (start_time + segment_duration - padding_end)
 
                 new_tc_list = new_tc_list[mask_start & mask_end]
-                new_tc_list = np.sort(new_tc_list)
+                new_snr_list = new_snr_list[mask_start & mask_end]
+
+                # We need to sort the times, but we must sort the SNR array in the exact same order:
+                # np.argsort return the indeces used to sort a certain array
+                # e.g. np.argsort(np.array(10, 30, 20)) = [0, 2, 1]
+                sort_indices = np.argsort(new_tc_list)
+                new_tc_list = new_tc_list[sort_indices]
+                new_snr_list = new_snr_list[sort_indices].astype(np.float16)
             else:
                 new_tc_list = np.array([])
+                new_snr_list = np.array([], dtype=np.float16)
 
             # Saving the times in a dictionary with the same key as the segment
             tc_dict_random[key] = new_tc_list
             tc_dict_original[key] = original_tc_list
+            snr_dict[key] = new_snr_list
 
-    return tc_dict_original, tc_dict_random
+    return tc_dict_original, tc_dict_random, snr_dict
 
 def foreground_segmentation(
     foreground_path : str,
@@ -398,7 +433,9 @@ def foreground_segmentation(
     - `S` is the total number of augmented segments appended across all injections i.e.
     the total number of coalescence times generated by `get_tc`;
     - `stride * 2048` is the number of sampled points per output segment
-      (assuming a 2048 Hz sampling rate).
+    (a 2048 Hz sampling rate is assumed).
+    In the same output file, another dataset will be saved containing the SNR values
+    for each coalescence (also computed with `get_tc`).
 
     Parameters
     ----------
@@ -407,7 +444,7 @@ def foreground_segmentation(
     injections_path : str
         Path to the HDF5 file contraining the injections parameters.
     segmented_foreground_path : str
-        Path to the output HDF5 file with the segmented and whitened signal.
+        Path to the output HDF5 file with the segmented and whitened signal and SNR.
     interval : float | int, optional
         Duration in seconds of the window used to compute the PSD, by default 6.
     stride : float | int, optional
@@ -440,7 +477,7 @@ def foreground_segmentation(
         raise ValueError("Please select a stride value higher than the default_time one.")
 
     # Generating the augmented tc dictionary
-    _, tc_dict_random = get_tc(foreground_path, injections_path, random_interval)
+    _, tc_dict_random, snr_dict = get_tc(foreground_path, injections_path, random_interval)
 
     with (h5py.File(foreground_path, "r") as f_in,
           h5py.File(segmented_foreground_path, "w") as f_out):
@@ -458,6 +495,18 @@ def foreground_segmentation(
             )
 
         dset = f_out["whitened"]
+
+        # Creating the dataset that will contain the SNR value per segment
+        f_out.create_dataset(
+            "snr",
+            shape = (0,),
+            # None lets us append as many intervals as needed
+            maxshape = (None,),
+            chunks = True,
+            dtype = "f2" # float16
+            )
+
+        snr_dset = f_out["snr"]
 
         for key in H1:
 
@@ -518,3 +567,17 @@ def foreground_segmentation(
                 torch_whitened,
                 psd
             )
+
+            # Saving the SNR value in the corresponding dataset
+            snr_array = np.array(snr_dict[key])
+            snr_dset_old_dim = snr_dset.shape[0]
+            snr_dset_new_dim = snr_dset_old_dim + len(snr_array)
+            snr_dset.resize(snr_dset_new_dim, axis = 0)
+            snr_dset[snr_dset_old_dim : ] = snr_array
+
+if __name__ == "__main__":
+    bkg_path = "/home/lorenzo02/MLGWSC_proposal/data/background.hdf"
+    for_path = "/home/lorenzo02/MLGWSC_proposal/data/foreground.hdf"
+    inj_path = "/home/lorenzo02/MLGWSC_proposal/data/injections.hdf"
+    explore_data(bkg_path, for_path, inj_path)
+    #get_tc(for_path, inj_path, 2.1)

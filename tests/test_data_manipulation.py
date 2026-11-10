@@ -107,11 +107,20 @@ def test_get_tc(tmp_path: pathlib.Path) -> None:
             tc = a + 50 + rng.random() * 900
             tc_list.append(tc)
 
+        # Generating distance, mchirp, inclination mock values and adding them to the mock file
+        num_injections = len(tc_list)
         inj["tc"] = tc_list
+        inj["distance"] = rng.uniform(100, 1000, size=num_injections)
+        inj["mchirp"] = rng.uniform(10, 50, size=num_injections)
+        inj["inclination"] = rng.uniform(0, np.pi, size=num_injections)
 
-        tc_dict_original, tc_dict_random = get_tc(str(fore_path), str(inj_path), 200)
+        tc_dict_original, tc_dict_random, snr_dict = get_tc(str(fore_path), str(inj_path), 200)
 
         # Asserting that the original times are correctly saved in a dictionary
+        assert len(tc_dict_original.keys()) == 9
+
+        # Asserting dictionaries keys match
+        assert set(tc_dict_original.keys()) == set(tc_dict_random.keys()) == set(snr_dict.keys())
         assert len(tc_dict_original.keys()) == 9
 
         # Asserting that random times are correctly generetad
@@ -125,6 +134,18 @@ def test_get_tc(tmp_path: pathlib.Path) -> None:
         50 <= tc - int(start_time) <= 950
         for start_time, tc_list in tc_dict_random.items()
         for tc in tc_list
+        )
+
+        # Asserting SNR values are valid numbers and positive
+        assert all(
+            not np.isnan(snr_array).any()
+            for snr_array in snr_dict.values()
+        )
+
+        assert all(
+            np.all(snr_array > 0)
+            for snr_array in snr_dict.values()
+            if len(snr_array) > 0
         )
 
 
@@ -200,6 +221,9 @@ def test_foreground_segmentation(tmp_path: pathlib.Path) -> None:
     with h5py.File(injections_path, "w") as f:
         # Put an injection exactly in the middle of our 15s segment
         f.create_dataset("tc", data=np.array([start_gps + 7.5]))
+        f["distance"] = np.array([1000])
+        f["mchirp"] = np.array([30])
+        f["inclination"] = np.array([1.5])
 
     # Calling the foreground segmentation function with
     # interval = 2s, stride = 1s, default_time = 0.4s
@@ -212,7 +236,7 @@ def test_foreground_segmentation(tmp_path: pathlib.Path) -> None:
         default_time=0.4
     )
 
-    # Asserting the the output file was actually created
+    # Asserting that the output file was actually created
     assert segmented_path.exists()
 
     with h5py.File(segmented_path, "r") as f:
@@ -226,6 +250,10 @@ def test_foreground_segmentation(tmp_path: pathlib.Path) -> None:
         assert dset.shape[2] == 2048
 
         assert not np.isnan(dset[()]).any()
+
+        # Asserting that the output SNR dataset shape is (num_random_tc)
+        snr_dset = f["snr"]
+        assert snr_dset.shape[0] == 5
 
 def test_segmentation_exceptions(tmp_path: pathlib.Path) -> None:
     # We only need mock paths to pass as the function parameters,

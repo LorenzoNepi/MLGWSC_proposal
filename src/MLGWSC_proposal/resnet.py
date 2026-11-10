@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from MLGWSC_proposal.dain import DAIN_Layer
+
 
 class Block(nn.Module):
     """
@@ -269,5 +271,17 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
         x = torch.flatten(x, 1)
         # shape of x : (batch_size, 2048) = (batch_size, num_channels)
         x = self.output(x)
+        # shape of x : (batch_size, num_classes)
+        return x
 
+class GW_ResNet152(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.dain = DAIN_Layer(mode = "full", input_dim = 2)
+        # DAIN_layer does not modify the shape of the input tensor
+        self.resnet = ResNet(stages = [3, 8, 36, 3], input_channels = 2, num_classes = 1)
+
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        x = self.dain(x)
+        x = self.resnet(x)
         return x
