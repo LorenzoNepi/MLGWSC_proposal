@@ -23,7 +23,9 @@ authors = [
 dependencies = [
   "numpy",
   "h5py",
-  "torch"
+  "torch",
+  "torchmetrics",
+  "matplotlib"
   ]
 
 [tool.setuptools_scm]
