@@ -103,8 +103,8 @@ def test_get_tc(tmp_path: pathlib.Path) -> None:
             # Generating groups and datasets to simulate 1000s segments
             rng = np.random.default_rng()
             fore["H1"][str(a)] = rng.standard_normal(2048 * 1000)
-            # Generating a mock injection time between 50s and 950s for each segment
-            tc = a + 50 + rng.random() * 900
+            # Generating a mock injection time between 150s and 850s for each segment
+            tc = a + 150 + rng.random() * 700
             tc_list.append(tc)
 
         # Generating distance, mchirp, inclination mock values and adding them to the mock file
