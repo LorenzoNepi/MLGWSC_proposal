@@ -1,5 +1,7 @@
 import warnings
 
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -78,26 +80,34 @@ class EarlyStopping:
 
 
 def bc_train_loop(
-    dataloader: DataLoader,
-    model: nn.Module,
+    back_dataloader : DataLoader,
+    fore_dataloader : DataLoader,
+    model : nn.Module,
     loss_fn : nn.Module,
     optimizer : torch.optim.Optimizer,
     device : torch.device | str
 ) -> float:
-    """
-    Execute a single training epoch for binary classification.
+    """Execute a single training epoch for binary classification.
+
+    This function iterates simultaneously over the background and foreground
+    dataloaders. For each step, it concatenates the background and foreground
+    tensors to create a perfectly balanced 50/50 batch, shuffles the batch
+    internally, and performs the standard forward pass, loss computation,
+    and backpropagation.
 
     Parameters
     ----------
-    dataloader : DataLoader
-        PyTorch DataLoader containing the training dataset.
+    back_dataloader : DataLoader
+        PyTorch DataLoader containing the background dataset.
+    fore_dataloader : DataLoader
+        PyTorch DataLoader containing the foreground dataset.
     model : nn.Module
         The neural network model to be trained.
     loss_fn : nn.Module
         The loss function criterion (e.g. nn.BCEWithLogitsLoss).
     optimizer : torch.optim.Optimizer
         The optimization algorithm (e.g. Adam, AdamW).
-    device : torch.device | str
+    device: torch.device | str
         The device where computations will be performed (e.g. "cuda", "cpu").
 
     Returns
@@ -105,15 +115,29 @@ def bc_train_loop(
     float
         The average training loss across all batches in the epoch.
     """
+
     # Setting the model in train mode
     model.train()
-    total_loss = 0
-    num_batches = len(dataloader)
+    total_loss = 0.0
+    # zip() stops at the shortest iterable so the actual number of batches
+    # processed is the minimum of the two dataloaders lengths, which might
+    # be different for curriculum learning.
+    num_batches = min(len(back_dataloader), len(fore_dataloader))
 
     # Iterating over the batches
-    for X, y in dataloader:
+    for (X_back, y_back) , (X_fore, y_fore) in zip(back_dataloader, fore_dataloader, strict=False):
+
+        # Concatenening tensors along the batch dimension and shuffling
+        X = torch.cat([X_back, X_fore], dim=0)
+        y = torch.cat([y_back, y_fore], dim=0)
+
+        indexes = torch.randperm(X.shape[0])
+        X = X[indexes]
+        y = y[indexes]
+
         # Moving data to GPU
-        X, y = X.to(device, non_blocking = True), y.to(device, non_blocking = True)
+        X = X.to(device, non_blocking = True)
+        y = y.to(device, non_blocking = True)
 
         # Resetting the optimizers gradients
         optimizer.zero_grad(set_to_none = True)
@@ -141,22 +165,29 @@ def bc_train_loop(
 
 
 def bc_validation_loop(
-    dataloader: DataLoader,
-    model: nn.Module,
-    loss_fn: nn.Module,
-    device: torch.device | str
-) -> tuple[float, float, list]:
-    """Computing validation loss and metric value (AUC) after each training epoch.
+    back_loader : DataLoader,
+    fore_loader : DataLoader,
+    model : nn.Module,
+    loss_fn : nn.Module,
+    device : torch.device | str
+) -> tuple[float, float, list[float]]:
+    """Compute validation loss and metric value (AUC) after each training epoch.
+
+    This function iterates simultaneously over the background and foreground
+    validation dataloaders, computing the validation loss and the AUC metric
+    for model evaluation.
 
     Parameters
     ----------
-    dataloader : DataLoader
-        PyTorch DataLoader containing the training dataset.
+    back_loader : DataLoader
+        PyTorch DataLoader containing the validation background dataset.
+    fore_loader : DataLoader
+        PyTorch DataLoader containing the validation foreground dataset.
     model : nn.Module
         The neural network model to be evaluated.
     loss_fn : nn.Module
         The loss function criterion (e.g. nn.BCEWithLogitsLoss).
-    device : torch.device | str
+    device: torch.device | str
         The device where computations will be performed (e.g. "cuda", "cpu").
 
     Returns
@@ -170,19 +201,26 @@ def bc_validation_loop(
 
     # Setting the model in test mode
     model.eval()
-
-    num_batches = len(dataloader)
-    total_val_loss = 0
+    total_val_loss = 0.0
+    num_batches = min(len(back_loader), len(fore_loader))
 
     # Utilizing torchmetrics to define the ROC as a metric instead of accuracy
     # Advantage: everything is computed on the GPU + more precise on unbalanced datasets
     roc_metric = BinaryAUROC().to(device)
     probs_list = []
 
+    # Iterating over the batches
     # Making sure no gradient is computed during validation
-    with torch.no_grad():
-        for X, y in dataloader:
-            X, y = X.to(device, non_blocking=True), y.to(device, non_blocking=True)
+    with torch.no_grad():                         # For some reason ruff wants the strict parameter
+        for (X_back, y_back) , (X_fore, y_fore) in zip(back_loader, fore_loader, strict = False):
+
+            # Concatenening tensors along the batch dimension
+            X = torch.cat([X_back, X_fore], dim=0)
+            y = torch.cat([y_back, y_fore], dim=0)
+
+            # Moving data to GPU
+            X = X.to(device, non_blocking = True)
+            y = y.to(device, non_blocking = True)
 
             # Computing validation loss
             logits = model(X)
@@ -282,32 +320,42 @@ def get_optimizer(model: GW_ResNet152, base_lr: float = 1e-3) -> torch.optim.Opt
 
     return torch.optim.AdamW(dain_group + resnet_group)
 
+
 def train_gw_resnet152(
     model : GW_ResNet152,
-    train_loader : DataLoader,
-    val_loader : DataLoader,
-    epochs : int = 500,
+    back_train_loader : DataLoader,
+    fore_train_loader : DataLoader,
+    back_val_loader : DataLoader,
+    fore_val_loader : DataLoader,
+    epochs : int = 50,
+    cl_epochs : int = 4,
     path : str = 'best_model.pth',
     verbose : bool = False
 ) -> tuple[list[float], list[float], list[float]]:
-    """
-    Executes the full training and validation pipeline for the `GW_ResNet152` model
+    """Execute the full training and validation pipeline for the `GW_ResNet152` model.
 
     This function handles the learning loop across multiple epochs, applying backpropagation,
-    learning rate scheduling (`ReduceLROnPlateau`), early stopping and computing the metric
-    (AUC) on the validation set. The best model weights are automatically saved to disk and
-    loaded back into the model at the end of the training process.
+    learning rate scheduling (`ReduceLROnPlateau`), early stopping, and computing the metric
+    (AUC) on the validation set. It also manages Curriculum Learning dynamically via the
+    foreground dataset's `snr_split` property. The best model weights are automatically
+    saved to disk and loaded back into the model at the end of the training process.
 
     Parameters
     ----------
     model : GW_ResNet152
-        The neural network to be trained, istance of `GW_ResNet152`.
-    train_loader : DataLoader
-        DataLoader containing the whitened background and foreground training segments.
-    val_loader : DataLoader
-        DataLoader containing the whitened background and foreground validation segments.
+        The neural network to be trained, instance of `GW_ResNet152`.
+    back_train_loader : DataLoader
+        DataLoader containing the whitened background training segments.
+    fore_train_loader : DataLoader
+        DataLoader containing the whitened foreground training segments.
+    back_val_loader : DataLoader
+        DataLoader containing the whitened background validation segments.
+    fore_val_loader : DataLoader
+        DataLoader containing the whitened foreground validation segments.
     epochs : int, optional
-        Maximum number of training epochs to execute, by default 500.
+        Maximum number of training epochs to execute, by default 50.
+    cl_epochs : int, optional
+        Number of epochs dedicated to each curriculum step, by default 4.
     path : str, optional
         File path where the best model weights will be saved, by default 'best_model.pth'.
     verbose : bool, optional
@@ -345,11 +393,34 @@ def train_gw_resnet152(
 
     model = model.to(device)
 
+    if cl_epochs >= epochs*2 or cl_epochs < 0:
+        raise ValueError("cl_epochs must be a positive number < epochs*2 "
+                         "otherwise your model will not be trainined on the lower SNR segments")
+    elif cl_epochs == 0:
+        curriculum_learning = False
+    else:
+        curriculum_learning = True
+
+    # Running training over all the epochs
     for i in range(epochs):
+        # Curriculum learning: the ResNet will train only with signals in the top 20% SNR values,
+        # then after cl_epochs epochs with signals in the top 50% and then will the full dataset
+        if curriculum_learning and i < cl_epochs:
+            fore_train_loader.dataset.snr_split = 0.2
+        elif curriculum_learning and i < cl_epochs*2:
+            fore_train_loader.dataset.snr_split = 0.5
+        elif curriculum_learning and i >= cl_epochs*2:
+            fore_train_loader.dataset.snr_split = 1.0
+        else: # curriculum_learning not active
+            fore_train_loader.snr_split = 1.0
 
         # Training the model: saving loss and metric values
-        train_loss = bc_train_loop(train_loader, model, loss_fn, optimizer, device)
-        val_loss, val_auc, _ = bc_validation_loop(val_loader, model, loss_fn, device)
+        train_loss = bc_train_loop(
+            back_train_loader, fore_train_loader, model, loss_fn, optimizer, device
+            )
+        val_loss, val_auc, _ = bc_validation_loop(
+            back_val_loader, fore_val_loader, model, loss_fn, device
+            )
         train_loss_list.append(train_loss)
         val_loss_list.append(val_loss)
         val_auc_list.append(val_auc)
@@ -366,10 +437,65 @@ def train_gw_resnet152(
             print(f"Early stopping triggered at epoch {i+1}!")
             break
 
-    if verbose:
-        print(f"Training completed. Loading best weights from {path}.")
+
+    print(f"Training completed. Loading best weights from {path}.")
 
     # Best practice: loading the best weights at the end of training
     model.load_state_dict(torch.load(path, weights_only=True, map_location=device))
 
     return train_loss_list, val_loss_list, val_auc_list
+
+
+def plot_training_result(
+    train_loss_list : list[float],
+    val_loss_list : list[float],
+    val_auc_list : list[float],
+    savefig : None | str = None
+    ) -> None:
+    """Plot the training loss, tha validation loss and the AUC metric per epoch.
+
+    Parameters
+    ----------
+    train_loss_list : list[float]
+        Training loss per epoch.
+    val_loss_list : list[float]
+        Validation loss per epoch.
+    val_auc_list : list[float]
+        AUC value per epoch (metric).
+    savefig : None | str, optional
+        Path to save the plot, by default None.
+    """
+    epochs = np.arange(1, len(train_loss_list) + 1)
+
+    fig = plt.figure(figsize=(10, 5))
+    fig.suptitle(f"GW_ResNet152 training results for {len(train_loss_list)} epochs")
+
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax1.set_title("Train loss and validation loss per epoch")
+    ax1.plot(epochs, train_loss_list, color = "blue", label = "Train Loss")
+    ax1.plot(epochs, val_loss_list, color = "cyan", label = "Validation Loss")
+    ax1.grid(True)
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Loss")
+    ax1.legend()
+
+    ax2 = fig.add_subplot(1, 2, 2)
+    ax2.set_title("Area Under the ROC Curve (AUC) per epoch")
+    ax2.scatter(
+        epochs,
+        val_auc_list,
+        marker = ".",
+        color="green",
+        alpha = 0.5,
+        label="AUC"
+    )
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("AUC")
+    ax2.grid(True)
+    ax2.legend()
+
+    if savefig is not None:
+        plt.savefig(savefig, bbox_inches="tight")
+        print(f"Figure saved as {savefig}")
+
+    plt.show()

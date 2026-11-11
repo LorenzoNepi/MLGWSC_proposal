@@ -118,7 +118,7 @@ class Block(nn.Module):
         # Residual skip connection
         if self.identity_downsample is not None:
             identity = self.identity_downsample(identity)
-        x += identity
+        x = x + identity
         x = self.relu(x)
 
         return x

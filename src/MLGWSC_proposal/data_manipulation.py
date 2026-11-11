@@ -7,9 +7,9 @@ import torch
 
 # ---------- Data exploration ----------
 def explore_data(
-    background_path: str,
-    foreground_path: str,
-    injections_path: str
+    background_path : str,
+    foreground_path : str,
+    injections_path : str
 ) -> None:
     """Print relevant info about the background, foreground and injections HDF5 files for training.
 
@@ -55,9 +55,9 @@ def explore_data(
 
 # ---------- Segmentation and whitening ----------
 def welch_psd(
-    torch_segment: torch.Tensor,
-    interval_index: int,
-    device: torch.device | str = "cpu"
+    torch_segment : torch.Tensor,
+    interval_index : int,
+    device : torch.device | str = "cpu"
 ) -> torch.Tensor:
     """Compute the Power Spectral Density (PSD) on a strain segment using the Welch method.
 
@@ -96,7 +96,7 @@ def welch_psd(
     return psd_welch
 
 def whiten(
-    torch_segmented: torch.Tensor,
+    torch_segmented : torch.Tensor,
     interval : float,
     psd : torch.Tensor,
     device : torch.device | str = "cpu",
@@ -132,7 +132,7 @@ def whiten(
 
     # Using a Hann window to reduce border effects
     hann_window = torch.hann_window(
-        int(interval * 2048),
+        round(interval * 2048), # Using round() instad of int() for numerical stability
         dtype = torch_segmented.dtype,
         device = device
         )
@@ -144,14 +144,14 @@ def whiten(
 
     # Applying frequency cut-off
     # delta_f = 1 / interval => cutoff_index = hz_cutoff / delta_f = interval * hz_cutoff
-    cutoff_index = int(interval * hz_cutoff)
+    cutoff_index = round(interval * hz_cutoff)
     inv_asd[:, :cutoff_index] = 0.0
 
     # Whitening the data and going back to time domain
     whitened_fourier = fft_segments * inv_asd.unsqueeze(1)
     torch_whitened = torch.fft.irfft(
         whitened_fourier,
-        n = int(interval * 2048),
+        n = round(interval * 2048),
         dim = 2,
         norm = "forward"
         )
@@ -208,8 +208,8 @@ def torch_segmentation(
         raise ValueError("interval * sample_frequency and stride * sample_frequency "
                          "must be int to get a valid index")
 
-    interval_index = int(interval_index)
-    stride_index = int(stride_index)
+    interval_index = round(interval_index)
+    stride_index = round(stride_index)
 
     # Opening the input and output HDF5 files
     with (
@@ -265,7 +265,7 @@ def torch_segmentation(
             torch_whitened = whiten(torch_segmented,
                                     interval, psd,
                                     device = device,
-                                    hz_cutoff = int(f_in.attrs["low_frequency_cutoff"]))
+                                    hz_cutoff = round(f_in.attrs["low_frequency_cutoff"]))
 
             # Crop borders so that the small segments' length is exactly stride * 2048
             cut_index = (interval_index - stride_index) // 2
@@ -335,8 +335,8 @@ def get_tc(
         # inj_attr = dict(f_inj.attrs.items())
 
         # Retrieving padding on the edges
-        padding_start = int(fore_attr["padding_start"])
-        padding_end = int(fore_attr["padding_end"])
+        padding_start = round(fore_attr["padding_start"])
+        padding_end = round(fore_attr["padding_end"])
 
         # Selecting the coalescence times in our foreground data
         # from all the times contained in f_inj["tc"][()] for each segment
@@ -396,11 +396,11 @@ def get_tc(
                 new_snr_list = new_snr_list[mask_start & mask_end]
 
                 # We need to sort the times, but we must sort the SNR array in the exact same order:
-                # np.argsort return the indeces used to sort a certain array
+                # np.argsort return the indexes used to sort a certain array
                 # e.g. np.argsort(np.array(10, 30, 20)) = [0, 2, 1]
-                sort_indices = np.argsort(new_tc_list)
-                new_tc_list = new_tc_list[sort_indices]
-                new_snr_list = new_snr_list[sort_indices].astype(np.float16)
+                sort_indexes = np.argsort(new_tc_list)
+                new_tc_list = new_tc_list[sort_indexes]
+                new_snr_list = new_snr_list[sort_indexes].astype(np.float16)
             else:
                 new_tc_list = np.array([])
                 new_snr_list = np.array([], dtype=np.float16)
@@ -468,8 +468,8 @@ def foreground_segmentation(
         raise ValueError("interval * sample_frequency and stride * sample_frequency "
                          "must be int to get a valid index")
 
-    interval_index = int(interval_index)
-    stride_index = int(stride_index)
+    interval_index = round(interval_index)
+    stride_index = round(stride_index)
 
     # Checking if stride and default_time are compatible
     random_interval = stride - default_time
@@ -546,10 +546,11 @@ def foreground_segmentation(
             torch_whitened = whiten(torch_segmented,
                                     interval, psd,
                                     device = device,
-                                    hz_cutoff = int(f_in.attrs["low_frequency_cutoff"]))
+                                    hz_cutoff = round(f_in.attrs["low_frequency_cutoff"]))
 
             # Crop borders so that the small segments' length is exacty stride * 2048
             cut_index = (interval_index - stride_index) // 2
+            # Shape: (2, len(tc_index_list), stride * 2048)
             torch_whitened = torch_whitened[: , : , cut_index : -cut_index]
 
             # Appending whitened small segments to the dataset (need to be numpy array in the cpu)
@@ -574,10 +575,3 @@ def foreground_segmentation(
             snr_dset_new_dim = snr_dset_old_dim + len(snr_array)
             snr_dset.resize(snr_dset_new_dim, axis = 0)
             snr_dset[snr_dset_old_dim : ] = snr_array
-
-if __name__ == "__main__":
-    bkg_path = "/home/lorenzo02/MLGWSC_proposal/data/background.hdf"
-    for_path = "/home/lorenzo02/MLGWSC_proposal/data/foreground.hdf"
-    inj_path = "/home/lorenzo02/MLGWSC_proposal/data/injections.hdf"
-    explore_data(bkg_path, for_path, inj_path)
-    #get_tc(for_path, inj_path, 2.1)
