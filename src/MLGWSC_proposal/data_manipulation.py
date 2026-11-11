@@ -287,6 +287,8 @@ def torch_segmentation(
                 psd
             )
 
+            torch.cuda.empty_cache()
+
 # ---------- Foreground data for training ----------
 def get_tc(
     foreground_path : str,
