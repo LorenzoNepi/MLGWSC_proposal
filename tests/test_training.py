@@ -97,13 +97,15 @@ def test_bc_train_loop() -> None:
     device = "cpu"
 
     # Executing the training loop
-    avg_loss = bc_train_loop(
+    avg_loss, global_step = bc_train_loop(
         back_loader, fore_loader, model, loss_fn, optimizer, device
     )
 
-    # Checking that it returns a valid float loss
+    # Checking that it returns a valid float loss and global_step
     assert isinstance(avg_loss, float)
     assert avg_loss > 0.0
+    assert isinstance(global_step, int)
+    assert global_step == 5  # 10 samples / batch_size 2 = 5 batches
 
     # Checking that weights have been updated (meaning backward/step worked)
     assert not torch.all(model.linear.weight == initial_weights)
@@ -190,23 +192,23 @@ def test_train_gw_resnet152(tmp_path: pathlib.Path) -> None:
     model = GW_ResNet152()
     save_path = str(tmp_path / "best_model.pth")
 
-    # Running training for just 2 epochs with curriculum learning enabled
+    # Running training for just 3 epochs with curriculum learning enabled
     train_loss, val_loss, val_auc = train_gw_resnet152(
         model=model,
         back_train_loader=back_train_loader,
         fore_train_loader=fore_train_loader,
         back_val_loader=back_val_loader,
         fore_val_loader=fore_val_loader,
-        epochs=2,
+        epochs=3,
         cl_epochs=1,
         path=save_path,
         verbose=False
     )
 
     # Checking lists lengths match the number of executed epochs
-    assert len(train_loss) == 2
-    assert len(val_loss) == 2
-    assert len(val_auc) == 2
+    assert len(train_loss) == 3
+    assert len(val_loss) == 3
+    assert len(val_auc) == 3
 
     # Checking types and value bounds
     assert all(isinstance(a, float) for a in train_loss)
