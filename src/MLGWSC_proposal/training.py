@@ -1,4 +1,5 @@
 import warnings
+import math
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -85,15 +86,18 @@ def bc_train_loop(
     model : nn.Module,
     loss_fn : nn.Module,
     optimizer : torch.optim.Optimizer,
-    device : torch.device | str
-) -> float:
+    device : torch.device | str,
+    warmup_scheduler : torch.optim.lr_scheduler.LRScheduler | None = None,
+    global_step : int = 0
+) -> tuple[float, int]:
     """Execute a single training epoch for binary classification.
 
     This function iterates simultaneously over the background and foreground
     dataloaders. For each step, it concatenates the background and foreground
     tensors to create a perfectly balanced 50/50 batch, shuffles the batch
     internally, and performs the standard forward pass, loss computation,
-    and backpropagation.
+    and backpropagation with gradient clipping. It also steps a warmup scheduler
+    if provided.
 
     Parameters
     ----------
@@ -109,11 +113,19 @@ def bc_train_loop(
         The optimization algorithm (e.g. Adam, AdamW).
     device: torch.device | str
         The device where computations will be performed (e.g. "cuda", "cpu").
+    warmup_scheduler : torch.optim.lr_scheduler.LRScheduler | None, optional
+        A learning rate scheduler used to gradually increase the learning rate
+        during the initial steps of training, by default None.
+    global_step : int, optional
+        The current global step (batch iteration) counter across epochs, used
+        to track the warmup phase, by default 0.
 
     Returns
     -------
-    float
-        The average training loss across all batches in the epoch.
+    tuple[float, int]
+        A tuple containing:
+        - The average training loss across all batches in the epoch.
+        - The updated global step counter.
     """
 
     # Setting the model in train mode
@@ -154,14 +166,26 @@ def bc_train_loop(
         y = y.view(-1, 1).float()
         loss = loss_fn(pred, y)
 
+        #* Implementing gradient clipping: if the computed gradients are massive
+        # (causing loss explosions to millions), this scales them down
+        # so their total norm doesn't exceed 1.0.
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         # Backpropagation and weight optimization
         loss.backward()
         optimizer.step()
 
+        #* Advance the warmup scheduler during the first 500 steps
+        if warmup_scheduler is not None and global_step < 500:
+            warmup_scheduler.step()
+        global_step += 1
+
+        total_loss += loss.item()
+
         # Computing the total loss of batch and returning the mean loss per segment
         total_loss += loss.item()
 
-    return total_loss / num_batches
+    return total_loss / num_batches, global_step
 
 
 def bc_validation_loop(
@@ -376,8 +400,12 @@ def train_gw_resnet152(
     optimizer = get_optimizer(model)
 
     # Defining the scheduler and the early stopping class
-    scheduler = ReduceLROnPlateau(optimizer, mode = "min", factor = 0.1, patience = 10)
-    early_stopping = EarlyStopping(patience = 20, verbose = verbose, path = path)
+    scheduler = ReduceLROnPlateau(optimizer, mode = "min", factor = 0.1, patience = 4)
+    early_stopping = EarlyStopping(patience = 6, verbose = verbose, path = path)
+    #* Defining the warmup scheduler: starts the learning rate at 1% of its target value (1e-5)
+    # and linearly increases it over the first 500 batches to prevent early destabilization
+    warmup = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor = 0.01, total_iters = 500)
+    global_step = 0
 
     train_loss_list = []
     val_loss_list = []
@@ -393,7 +421,7 @@ def train_gw_resnet152(
 
     model = model.to(device)
 
-    if cl_epochs >= epochs*2 or cl_epochs < 0:
+    if cl_epochs*2 >= epochs or cl_epochs < 0:
         raise ValueError("cl_epochs must be a positive number < epochs*2 "
                          "otherwise your model will not be trainined on the lower SNR segments")
     elif cl_epochs == 0:
@@ -412,12 +440,20 @@ def train_gw_resnet152(
         elif curriculum_learning and i >= cl_epochs*2:
             fore_train_loader.dataset.snr_split = 1.0
         else: # curriculum_learning not active
-            fore_train_loader.snr_split = 1.0
+            fore_train_loader.dataset.snr_split = 1.0
 
         # Training the model: saving loss and metric values
-        train_loss = bc_train_loop(
-            back_train_loader, fore_train_loader, model, loss_fn, optimizer, device
+        train_loss, global_step = bc_train_loop(
+            back_dataloader = back_train_loader,
+            fore_dataloader = fore_train_loader,
+            model = model,
+            loss_fn = loss_fn,
+            optimizer = optimizer,
+            warmup_scheduler = warmup,
+            global_step = global_step,
+            device = device
             )
+
         val_loss, val_auc, _ = bc_validation_loop(
             back_val_loader, fore_val_loader, model, loss_fn, device
             )
@@ -425,9 +461,19 @@ def train_gw_resnet152(
         val_loss_list.append(val_loss)
         val_auc_list.append(val_auc)
 
+        #* We only step the main scheduler and early stopping if curriculum
+        # learning has reached the full dataset phase otherwise artificial difficulty
+        # spikes will trigger false early stops.
+        in_full_phase = (not curriculum_learning) or (i >= cl_epochs * 2)
+
         # Updating the scheduler and the early stopping function
         scheduler.step(val_loss)
         early_stopping(val_loss, model)
+
+        #* math.isfinite prevents crashing if a rogue NaN slips through
+        if in_full_phase and math.isfinite(val_loss):
+            scheduler.step(val_loss)
+            early_stopping(val_loss, model)
 
         if verbose:
             print(f"Epoch:{i+1}, Train Loss: {train_loss:.4f},",

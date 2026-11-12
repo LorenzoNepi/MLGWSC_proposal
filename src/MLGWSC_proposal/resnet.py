@@ -113,7 +113,6 @@ class Block(nn.Module):
         # 1x1 conv stride = 1 -> out_channels_1 * 4 activation maps
         x = self.block_conv3(x)
         x = self.block_norm3(x)
-        x = self.relu(x)
 
         # Residual skip connection
         if self.identity_downsample is not None:
@@ -230,6 +229,20 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
         # Pooling and Linear
         self.avgpool = nn.AdaptiveAvgPool1d(1)
         self.output = nn.Linear(2048, self.num_classes)
+
+        #*Initialize convolutional weights using Kaiming normal distribution
+        # to maintain variance stability across deep ReLU layers
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+
+        #*Zero-initialize the last BatchNorm layer in each residual block.
+        # This makes each residual block behave like an identity function at the start
+        # of training (x + 0 = x), drastically improving convergence in very deep networks
+        # (Goyal et al., 2018).
+        for m in self.modules():
+            if isinstance(m, Block):
+                nn.init.zeros_(m.block_norm3.weight)
 
     def _make_stage(
         self,

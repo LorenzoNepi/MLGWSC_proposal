@@ -100,8 +100,9 @@ def welch_psd(
         chunk = welch_segmented[ : , i : i+chunk_size, : ]
         chunk = chunk * hann_window
 
-        # Computing the squared module of the 1-D Fourier transform with normalization ("forward")
-        fourier_chunk = torch.fft.rfft(chunk, dim = 2, norm = "forward")
+        # Computing the squared module of the 1-D Fourier transform with normalization ("ortho")
+        # Using norm="ortho" preserves magnitudes from artificially exploding or shrinking.
+        fourier_chunk = torch.fft.rfft(chunk, dim = 2, norm = "ortho")
         fourier_chunk = torch.abs(fourier_chunk)**2
         fourier_chunks.append(fourier_chunk)
         # Shape: (2, chunk_size, interval_index//2 + 1) due to torch.fft.rfft
@@ -159,8 +160,11 @@ def whiten(
         device = device
         )
 
-    # Computing the inverse ASD
-    inv_asd = 1 / torch.sqrt(psd + 1e-15) # Added for stability
+    # Computing the inverse ASD (adding a relative floor for stability)
+    # We use torch.clamp with a relative floor (1e-20 * max_value_in_channel) instead of
+    # a fixed value. This prevents dividing by zero while respecting the natural
+    # extremely low magnitudes of gravitational wave signals (e.g., 1e-22).
+    inv_asd = 1.0 / torch.sqrt(torch.clamp(psd, min=psd.amax(dim=1, keepdim=True) * 1e-20))
 
     # Applying frequency cut-off
     # delta_f = 1 / interval => cutoff_index = hz_cutoff / delta_f = interval * hz_cutoff
@@ -177,7 +181,7 @@ def whiten(
         chunk = chunk * hann_window
 
         # Whitening the chunk (frequency domain)
-        fourier_chunk = torch.fft.rfft(chunk, dim = 2, norm = "forward")
+        fourier_chunk = torch.fft.rfft(chunk, dim = 2, norm = "ortho")
         whitened_fourier = fourier_chunk * inv_asd
 
         # Back to time domain with inverse FFT
@@ -185,7 +189,7 @@ def whiten(
             whitened_fourier,
             n = round(interval * 2048),
             dim = 2,
-            norm = "forward"
+            norm = "ortho"
         )
         whitened_chunks.append(chunk_whitened)
 
@@ -272,7 +276,7 @@ def torch_segmentation(
         dset = f_out["whitened"]
 
         # Iterating on every timeseries in the input HDF5 files (at least 2 hours of strain data)
-        for L_segment, H_segment in zip(H1.values(), L1.values(), strict = True):
+        for H_segment, L_segment in zip(H1.values(), L1.values(), strict = True):
 
             # Check if the strain timeseries is short enough to be contained in the GPU's VRAM.
             if len(L_segment) > max_length:
