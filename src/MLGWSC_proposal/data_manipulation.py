@@ -57,7 +57,8 @@ def explore_data(
 def welch_psd(
     torch_segment : torch.Tensor,
     interval_index : int,
-    device : torch.device | str = "cpu"
+    device : torch.device | str = "cpu",
+    chunk_size : int = 512
 ) -> torch.Tensor:
     """Compute the Power Spectral Density (PSD) on a strain segment using the Welch method.
 
@@ -69,6 +70,8 @@ def welch_psd(
         Number of sampled points per interval.
     device : torch.device | str, optional
         Device that will execute the computations, by default `"cpu"`.
+    chunk_size : int, optional
+        Number of segments processed simultaneously to prevent VRAM saturation, by default 512.
 
     Returns
     -------
@@ -83,24 +86,41 @@ def welch_psd(
 
     # Using a Hann window function to make the psd "smoother"
     hann_window = torch.hann_window(interval_index, dtype = torch_segment.dtype, device = device)
-    welch_segmented *= hann_window
 
-    # Computing the squared module of the 1-D Fourier transform with normalization ("forward")
-    welch_fourier = torch.fft.rfft(welch_segmented, dim = 2, norm = "forward")
-    welch_fourier = torch.abs(welch_fourier)**2
+    # Chunking the FFT computation to save VRAM space. Without it the complex
+    # torch.fft.rfft operation saturates a 16 GB VRAM almonts instantly and
+    # OutOfMemoryError is raised
+    num_windows = welch_segmented.shape[1]
+    fourier_chunks = []
+
+    # Iterating over the chunks
+    for i in range(0, num_windows, chunk_size):
+        # torch will not raise an IndexOutOfBoundException in the last iteration,
+        # it will just take a smaller segment
+        chunk = welch_segmented[ : , i : i+chunk_size, : ]
+        chunk = chunk * hann_window
+
+        # Computing the squared module of the 1-D Fourier transform with normalization ("forward")
+        fourier_chunk = torch.fft.rfft(chunk, dim = 2, norm = "forward")
+        fourier_chunk = torch.abs(fourier_chunk)**2
+        fourier_chunks.append(fourier_chunk)
+        # Shape: (2, chunk_size, interval_index//2 + 1) due to torch.fft.rfft
+
+    # Reassemble chunks along the segment dimension
+    welch_fourier = torch.cat(fourier_chunks, dim = 1)
+    psd_welch = torch.mean(welch_fourier, dim = 1)
     # Shape: (2, interval_index//2 + 1) due to torch.fft.rfft
 
-    # Computing the PSD with the same length of the interval
-    psd_welch = torch.mean(welch_fourier, dim = 1)
-
     return psd_welch
+
 
 def whiten(
     torch_segmented : torch.Tensor,
     interval : float,
     psd : torch.Tensor,
     device : torch.device | str = "cpu",
-    hz_cutoff : float = 20
+    hz_cutoff : float = 20,
+    chunk_size : int = 512
     ) -> torch.Tensor:
     """Whiten strain segments in the frequency domain after applying a high-pass filter.
 
@@ -123,6 +143,8 @@ def whiten(
         Device that will execute the computations, by default `"cpu"`.
     hz_cutoff : float, optional
         Frequency cut-off (Hz), by default 20.
+    chunk_size : int, optional
+        Number of segments processed simultaneously to prevent VRAM saturation, by default 512.
 
     Returns
     -------
@@ -136,34 +158,49 @@ def whiten(
         dtype = torch_segmented.dtype,
         device = device
         )
-    torch_segmented = torch_segmented * hann_window
 
-    # Transforming the segments to the frequency domain
-    fft_segments = torch.fft.rfft(torch_segmented, dim = 2, norm = "forward")
+    # Computing the inverse ASD
     inv_asd = 1 / torch.sqrt(psd + 1e-15) # Added for stability
 
     # Applying frequency cut-off
     # delta_f = 1 / interval => cutoff_index = hz_cutoff / delta_f = interval * hz_cutoff
     cutoff_index = round(interval * hz_cutoff)
     inv_asd[:, :cutoff_index] = 0.0
+    inv_asd = inv_asd.unsqueeze(1)
 
-    # Whitening the data and going back to time domain
-    whitened_fourier = fft_segments * inv_asd.unsqueeze(1)
-    torch_whitened = torch.fft.irfft(
-        whitened_fourier,
-        n = round(interval * 2048),
-        dim = 2,
-        norm = "forward"
+    num_segments = torch_segmented.shape[1]
+    whitened_chunks = []
+
+    # Chunking the inverse FFT computation to save VRAM space.
+    for i in range(0, num_segments, chunk_size):
+        chunk = torch_segmented[ : , i : i+chunk_size, : ]
+        chunk = chunk * hann_window
+
+        # Whitening the chunk (frequency domain)
+        fourier_chunk = torch.fft.rfft(chunk, dim = 2, norm = "forward")
+        whitened_fourier = fourier_chunk * inv_asd
+
+        # Back to time domain with inverse FFT
+        chunk_whitened = torch.fft.irfft(
+            whitened_fourier,
+            n = round(interval * 2048),
+            dim = 2,
+            norm = "forward"
         )
+        whitened_chunks.append(chunk_whitened)
 
-    return torch_whitened
+    # Reassemble chunks along the segment dimension
+    return torch.cat(whitened_chunks, dim = 1)
+    # Shape(2, num_segments, interval_index)
+
 
 def torch_segmentation(
     data_path : str,
     segmented_path : str,
     max_length : float | int = 73728000,
     interval : float | int = 6,
-    stride : float | int = 2.5
+    stride : float | int = 2.5,
+    chunk_size : int = 512
 ) -> None:
     """Divide the strain data into whitened, fixed-length segments.
 
@@ -193,6 +230,9 @@ def torch_segmentation(
     stride : float | int, optional
         Stride of the windows in seconds, which also defines the output
         segment duration, by default 2.5.
+    chunk_size : int, optional
+        Number of segments processed simultaneously during FFT operations
+        to prevent VRAM saturation, by default 512.
     """
 
     # Trying to use the GPU for the computations
@@ -259,13 +299,16 @@ def torch_segmentation(
             # Shape: (2, #intervals, interval * 2048)
 
             # Compute the psd
-            psd = welch_psd(torch_segment, interval_index, device = device)
+            psd = welch_psd(
+                torch_segment, interval_index, device = device, chunk_size = chunk_size
+            )
 
             # Apply whitening
             torch_whitened = whiten(torch_segmented,
                                     interval, psd,
                                     device = device,
-                                    hz_cutoff = round(f_in.attrs["low_frequency_cutoff"]))
+                                    hz_cutoff = round(f_in.attrs["low_frequency_cutoff"]),
+                                    chunk_size = chunk_size)
 
             # Crop borders so that the small segments' length is exactly stride * 2048
             cut_index = (interval_index - stride_index) // 2
@@ -420,7 +463,8 @@ def foreground_segmentation(
     segmented_foreground_path: str,
     interval : float | int = 6,
     stride : float | int = 2.5,
-    default_time: float | int = 0.4
+    default_time : float | int = 0.4,
+    chunk_size : int = 512
 ) -> None:
     """Extract, whiten and augment strain segments containing GWs injections.
 
@@ -455,6 +499,9 @@ def foreground_segmentation(
     default_time: float | int, optional
         Safety margin in seconds from the segment borders where the coalescence
         time cannot be placed, by default 0.4
+    chunk_size : int, optional
+        Number of segments processed simultaneously during FFT operations
+        to prevent VRAM saturation, by default 512.
     """
 
     # Trying to use the GPU for the computations
@@ -531,7 +578,9 @@ def foreground_segmentation(
             # Shape: (2, len_segment) i.e. 2 channels
 
             # Compute the psd
-            psd = welch_psd(torch_segment, interval_index, device = device)
+            psd = welch_psd(
+                torch_segment, interval_index, device = device, chunk_size = chunk_size
+            )
 
             # Selecting the correct intervals
             intervals = []
@@ -548,7 +597,8 @@ def foreground_segmentation(
             torch_whitened = whiten(torch_segmented,
                                     interval, psd,
                                     device = device,
-                                    hz_cutoff = round(f_in.attrs["low_frequency_cutoff"]))
+                                    hz_cutoff = round(f_in.attrs["low_frequency_cutoff"]),
+                                    chunk_size = chunk_size)
 
             # Crop borders so that the small segments' length is exacty stride * 2048
             cut_index = (interval_index - stride_index) // 2
@@ -570,6 +620,8 @@ def foreground_segmentation(
                 torch_whitened,
                 psd
             )
+
+            torch.cuda.empty_cache()
 
             # Saving the SNR value in the corresponding dataset
             snr_array = np.array(snr_dict[key])
