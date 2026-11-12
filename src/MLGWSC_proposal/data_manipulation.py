@@ -1,3 +1,4 @@
+import gc
 import warnings
 
 import h5py
@@ -333,7 +334,7 @@ def torch_segmentation(
                 torch_whitened,
                 psd
             )
-
+            gc.collect()
             torch.cuda.empty_cache()
 
 # ---------- Foreground data for training ----------
@@ -620,11 +621,12 @@ def foreground_segmentation(
                 L_torch_segment,
                 H_torch_segment,
                 torch_segment,
+                intervals,
                 torch_segmented,
                 torch_whitened,
                 psd
             )
-
+            gc.collect()
             torch.cuda.empty_cache()
 
             # Saving the SNR value in the corresponding dataset
