@@ -1,5 +1,5 @@
-import warnings
 import math
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -166,13 +166,15 @@ def bc_train_loop(
         y = y.view(-1, 1).float()
         loss = loss_fn(pred, y)
 
+        # Backword propagation
+        loss.backward()
+
         #* Implementing gradient clipping: if the computed gradients are massive
         # (causing loss explosions to millions), this scales them down
         # so their total norm doesn't exceed 1.0.
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
-        # Backpropagation and weight optimization
-        loss.backward()
+        # Weight optimization
         optimizer.step()
 
         #* Advance the warmup scheduler during the first 500 steps
@@ -466,12 +468,9 @@ def train_gw_resnet152(
         # spikes will trigger false early stops.
         in_full_phase = (not curriculum_learning) or (i >= cl_epochs * 2)
 
-        # Updating the scheduler and the early stopping function
-        scheduler.step(val_loss)
-        early_stopping(val_loss, model)
-
         #* math.isfinite prevents crashing if a rogue NaN slips through
         if in_full_phase and math.isfinite(val_loss):
+            # Updating the scheduler and the early stopping function
             scheduler.step(val_loss)
             early_stopping(val_loss, model)
 
