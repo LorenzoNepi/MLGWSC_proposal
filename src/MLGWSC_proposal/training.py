@@ -1,6 +1,6 @@
 import math
-import warnings
 import time
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
