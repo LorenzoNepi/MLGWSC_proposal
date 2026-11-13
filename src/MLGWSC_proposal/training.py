@@ -183,10 +183,8 @@ def bc_train_loop(
             warmup_scheduler.step()
         global_step += 1
 
-        total_loss += loss.item()
-
         # Computing the total loss of batch and returning the mean loss per segment
-        total_loss += loss.item()
+        total_loss = total_loss + loss.item()
 
     return total_loss / num_batches, global_step
 
@@ -254,7 +252,7 @@ def bc_validation_loop(
             # Shape: (batch_size,) -> (batch_size, 1)
             y = y.view(-1, 1).float()
             val_loss = loss_fn(logits, y)
-            total_val_loss += val_loss.item()
+            total_val_loss = total_val_loss + val_loss.item()
 
             # Computing ROC and saving the probability for the 2 classes
             probs = torch.sigmoid(logits)
@@ -280,7 +278,7 @@ def bc_validation_loop(
     return total_val_loss/num_batches, roc_auc, probs_list
 
 
-def get_optimizer(model: GW_ResNet152, base_lr: float = 1e-3) -> torch.optim.Optimizer:
+def get_optimizer(model: GW_ResNet152, base_lr: float = 1e-4) -> torch.optim.Optimizer:
     """Configure the AdamW optimizer by separating the parameter groups for DAIN and ResNet.
 
     In a hybrid architecture like `GW_ResNet152`, applying global optimization rules
@@ -309,7 +307,7 @@ def get_optimizer(model: GW_ResNet152, base_lr: float = 1e-3) -> torch.optim.Opt
         and a `.resnet` attribute (the ResNet backbone). Expected to be an instance
         of `GW_ResNet152`.
     base_lr : float, optional
-        The primary learning rate applied to the ResNet backbone, by default 1e-3.
+        The primary learning rate applied to the ResNet backbone, by default 1e-4.
 
     Returns
     -------
@@ -357,6 +355,7 @@ def train_gw_resnet152(
     epochs : int = 50,
     cl_epochs : int = 4,
     path : str = 'best_model.pth',
+    base_lr : float = 1e-4,
     scheduler_factor : float = 0.1,
     scheduler_patience : int = 4,
     early_stopping_patience : int = 6,
@@ -386,14 +385,16 @@ def train_gw_resnet152(
         Maximum number of training epochs to execute, by default 50.
     cl_epochs : int, optional
         Number of epochs dedicated to each curriculum step, by default 4.
+    path : str, optional
+        File path where the best model weights will be saved, by default 'best_model.pth'.
+    base_lr : float = 1e-4
+        Initial learning rate of the optimizer, by default 1e-4.
     scheduler_factor : float
         `factor` parameter for the ReduceLROnPlateau class, by default 0.1.
     scheduler_patience : int
         `patience` parameter for the ReduceLROnPlateau class, by default 4.
     early_stopping_patience : int
         `patience` parameter for the EarlyStopping class, by default 6.
-    path : str, optional
-        File path where the best model weights will be saved, by default 'best_model.pth'.
     verbose : bool, optional
         If True, prints detailed training progress per epoch, by default False.
 
@@ -409,7 +410,7 @@ def train_gw_resnet152(
     # Defining the loss function (BCEWithLogitsLoss automatically applies
     # the sigmoid to the logits output of the ResNet, best practice for stability)
     loss_fn = nn.BCEWithLogitsLoss(reduction = "mean")
-    optimizer = get_optimizer(model)
+    optimizer = get_optimizer(model, base_lr = base_lr)
 
     # Defining the scheduler and the early stopping class
     scheduler = ReduceLROnPlateau(
