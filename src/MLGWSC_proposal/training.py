@@ -1,5 +1,6 @@
 import math
 import warnings
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -356,6 +357,9 @@ def train_gw_resnet152(
     epochs : int = 50,
     cl_epochs : int = 4,
     path : str = 'best_model.pth',
+    scheduler_factor : float = 0.1,
+    scheduler_patience : int = 4,
+    early_stopping_patience : int = 6,
     verbose : bool = False
 ) -> tuple[list[float], list[float], list[float]]:
     """Execute the full training and validation pipeline for the `GW_ResNet152` model.
@@ -382,6 +386,12 @@ def train_gw_resnet152(
         Maximum number of training epochs to execute, by default 50.
     cl_epochs : int, optional
         Number of epochs dedicated to each curriculum step, by default 4.
+    scheduler_factor : float
+        `factor` parameter for the ReduceLROnPlateau class, by default 0.1.
+    scheduler_patience : int
+        `patience` parameter for the ReduceLROnPlateau class, by default 4.
+    early_stopping_patience : int
+        `patience` parameter for the EarlyStopping class, by default 6.
     path : str, optional
         File path where the best model weights will be saved, by default 'best_model.pth'.
     verbose : bool, optional
@@ -402,8 +412,10 @@ def train_gw_resnet152(
     optimizer = get_optimizer(model)
 
     # Defining the scheduler and the early stopping class
-    scheduler = ReduceLROnPlateau(optimizer, mode = "min", factor = 0.1, patience = 4)
-    early_stopping = EarlyStopping(patience = 6, verbose = verbose, path = path)
+    scheduler = ReduceLROnPlateau(
+        optimizer, mode = "min", factor = scheduler_factor, patience = scheduler_patience)
+    early_stopping = EarlyStopping(
+        patience = early_stopping_patience, verbose = verbose, path = path)
     #* Defining the warmup scheduler: starts the learning rate at 1% of its target value (1e-5)
     # and linearly increases it over the first 500 batches to prevent early destabilization
     warmup = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor = 0.01, total_iters = 500)
@@ -433,6 +445,10 @@ def train_gw_resnet152(
 
     # Running training over all the epochs
     for i in range(epochs):
+
+        if verbose:
+            epoch_start_time = time.perf_counter()
+
         # Curriculum learning: the ResNet will train only with signals in the top 20% SNR values,
         # then after cl_epochs epochs with signals in the top 50% and then will the full dataset
         if curriculum_learning and i < cl_epochs:
@@ -475,13 +491,18 @@ def train_gw_resnet152(
             early_stopping(val_loss, model)
 
         if verbose:
-            print(f"Epoch:{i+1}, Train Loss: {train_loss:.4f},",
-                  f"Val Loss {val_loss:.4f}, AUC {val_auc:.4f} \n")
+            epoch_end_time = time.perf_counter()
+            elapsed_time = epoch_end_time - epoch_start_time
+
+            hours = int(elapsed_time // 3600)
+            mins = int((elapsed_time % 3600) // 60)
+            secs = int(elapsed_time % 60)
+            print(f"Epoch {i+1} [{hours}h {mins}m {secs}s] - Train Loss: {train_loss:.4f} - "
+                  f"Val Loss: {val_loss:.4f} - AUC: {val_auc:.4f}\n")
 
         if early_stopping.early_stop:
             print(f"Early stopping triggered at epoch {i+1}!")
             break
-
 
     print(f"Training completed. Loading best weights from {path}.")
 
