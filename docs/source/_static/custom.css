@@ -1,0 +1,4 @@
+dl.citation > dt.label {
+    width: max-content !important;
+    margin-right: 10px !important;
+}

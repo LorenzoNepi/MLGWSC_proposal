@@ -101,7 +101,7 @@ def test_get_tc(tmp_path: pathlib.Path) -> None:
 
         for a in range(2048 * 10**3, 2048 * 10**4, 2048 * 10**3):
             # Generating groups and datasets to simulate 1000s segments
-            rng = np.random.default_rng()
+            rng = np.random.default_rng(seed = 42)
             fore["H1"][str(a)] = rng.standard_normal(2048 * 1000)
             # Generating a mock injection time between 150s and 850s for each segment
             tc = a + 150 + rng.random() * 700
@@ -123,17 +123,16 @@ def test_get_tc(tmp_path: pathlib.Path) -> None:
         assert set(tc_dict_original.keys()) == set(tc_dict_random.keys()) == set(snr_dict.keys())
         assert len(tc_dict_original.keys()) == 9
 
-        # Asserting that random times are correctly generetad
+        # Asserting that shifted times are correctly generated in the right interval
         assert all(
-            len(tc_dict_original[key]) < len(tc_dict_random[key])
+            len(tc_dict_original[key]) == len(tc_dict_random[key])
             for key in tc_dict_original
-            )
+        )
 
-        # Asserting that all the generated times are in the correct interval
         assert all(
-        50 <= tc - int(start_time) <= 950
-        for start_time, tc_list in tc_dict_random.items()
-        for tc in tc_list
+            np.all(np.abs(tc_dict_random[key] - tc_dict_original[key]) <= 100.0)
+            and not np.array_equal(tc_dict_random[key], tc_dict_original[key])
+            for key in tc_dict_original
         )
 
         # Asserting SNR values are valid numbers and positive
@@ -155,7 +154,7 @@ def test_torch_segmentation(tmp_path: pathlib.Path) -> None:
     segmented_path = tmp_path / "segmented_background.hdf"
 
     # Creating mock raw data: 10s at 2048 Hz
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed = 42)
     test_strain = rng.standard_normal(2048 * 10)
 
     # Creating test HDF5 files with the correct expected structure
@@ -201,7 +200,7 @@ def test_foreground_segmentation(tmp_path: pathlib.Path) -> None:
     segmented_path = tmp_path / "segmented_foreground.hdf5"
 
     # Creating mock raw data: 15s at 2048 Hz
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed = 42)
     test_strain = rng.standard_normal(15 * 2048)
     start_gps = 1000000000
 
@@ -243,17 +242,17 @@ def test_foreground_segmentation(tmp_path: pathlib.Path) -> None:
         assert "whitened" in f
         dset = f["whitened"]
 
-        # Asserting that the output dataset shape is (num_channels, num_random_tc, stride * 2048)
-        # Since 1 signal was injected we expect 5 random tc to be generated and appended
+    # Asserting that the output dataset shape is (num_channels, num_random_tc, stride * 2048)
+    # Since 1 signal was injected we expect 1 shifted tc to be generated and appendeded
         assert dset.shape[0] == 2
-        assert dset.shape[1] == 5
+        assert dset.shape[1] == 1
         assert dset.shape[2] == 2048
 
         assert not np.isnan(dset[()]).any()
 
-        # Asserting that the output SNR dataset shape is (num_random_tc)
+        # Asserting that the output SNR dataset shape is (num_random_tc,) i.e (1,)
         snr_dset = f["snr"]
-        assert snr_dset.shape[0] == 5
+        assert snr_dset.shape[0] == 1
 
 def test_segmentation_exceptions(tmp_path: pathlib.Path) -> None:
     # We only need mock paths to pass as the function parameters,

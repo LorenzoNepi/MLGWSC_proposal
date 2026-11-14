@@ -16,7 +16,7 @@ from MLGWSC_proposal.resnet import GW_ResNet152
 class EarlyStopping:
     """Class to implement early stopping during training.
 
-    This custom class replicates the exact behavior of the namesake `Keras` callback:
+    This custom class replicates the behavior of the namesake Keras callback:
     - It monitors the validation loss and manages an internal counter epoch by epoch;
     - If the monitored value stops improving for `patience` consecutive epochs,
     the class signals the need to stop early to prevent overfitting.
@@ -89,7 +89,8 @@ def bc_train_loop(
     optimizer : torch.optim.Optimizer,
     device : torch.device | str,
     warmup_scheduler : torch.optim.lr_scheduler.LRScheduler | None = None,
-    global_step : int = 0
+    global_step : int = 0,
+    warmup_steps : int = 200
 ) -> tuple[float, int]:
     """Execute a single training epoch for binary classification.
 
@@ -120,6 +121,9 @@ def bc_train_loop(
     global_step : int, optional
         The current global step (batch iteration) counter across epochs, used
         to track the warmup phase, by default 0.
+    warmup_steps : int, optional
+        Total number of initial steps during which `warmup_scheduler` is stepped,
+        by default 200.
 
     Returns
     -------
@@ -178,8 +182,8 @@ def bc_train_loop(
         # Weight optimization
         optimizer.step()
 
-        #* Advance the warmup scheduler during the first 500 steps
-        if warmup_scheduler is not None and global_step < 500:
+        #* Advance the warmup scheduler during the first warmup_steps steps
+        if warmup_scheduler is not None and global_step < warmup_steps:
             warmup_scheduler.step()
         global_step += 1
 
@@ -278,40 +282,45 @@ def bc_validation_loop(
     return total_val_loss/num_batches, roc_auc, probs_list
 
 
-def get_optimizer(model: GW_ResNet152, base_lr: float = 1e-4) -> torch.optim.Optimizer:
+def get_optimizer(
+    model: GW_ResNet152,
+    base_lr: float = 1e-4,
+    weight_decay: float = 3e-2
+    ) -> torch.optim.Optimizer:
     """Configure the AdamW optimizer by separating the parameter groups for DAIN and ResNet.
 
     In a hybrid architecture like `GW_ResNet152`, applying global optimization rules
     to all weights can severely destabilize training. This function splits the model's
     parameters into distinct groups to apply specific learning rates and regularization:
 
-    1. **Weight Decay Prevention for DAIN**: The `mean_layer` and `scaling_layer` in
+    1. *Weight Decay Prevention for DAIN*: The `mean_layer` and `scaling_layer` in
        the DAIN module are initialized as identity matrices to preserve the input structure.
        If standard L2 regularization (weight decay) were applied, the optimizer would
        constantly push these weights towards zero, effectively erasing the signal over time.
        Therefore, `weight_decay` is strictly set to `0.0` for all DAIN components.
-    2. **Granular Learning Rates for DAIN**: DAIN acts as an adaptive preprocessing step.
+    2. *Granular Learning Rates for DAIN*: DAIN acts as an adaptive preprocessing step.
        To maintain stability across batches, its mean and variance estimations must adapt
        very slowly compared to the main network. Splitting DAIN into three separate
        dictionaries allows the optimizer to fetch the specific, generally much lower,
        learning rates (e.g., 1e-5) defined as attributes (`mean_lr`, `scale_lr`, `gate_lr`).
-    3. **Standard Optimization for ResNet**: The ResNet backbone is responsible for
+    3. *Standard Optimization for ResNet*: The ResNet backbone is responsible for
        complex feature extraction and classification. It requires a standard, faster
        learning rate (`base_lr`) to converge properly, alongside standard L2
-       regularization (`weight_decay=1e-2`) to prevent overfitting.
+       regularization (`weight_decay=3e-2`) to prevent overfitting.
 
     Parameters
     ----------
-    model : torch.nn.Module
+    model : GW_ResNet152
         The neural network model. It must contain a `.dain` attribute (the DAIN layer)
-        and a `.resnet` attribute (the ResNet backbone). Expected to be an instance
-        of `GW_ResNet152`.
+        and a `.resnet` attribute (the ResNet backbone).
     base_lr : float, optional
         The primary learning rate applied to the ResNet backbone, by default 1e-4.
+    weight_decay : float, optional
+        L2 weight decay coefficient applied to the ResNet backbone, by default 3e-2.
 
     Returns
     -------
-    torch.optim.torch.optim.Optimizer
+    torch.optim.Optimizer
         An AdamW optimizer configured with the grouped parameters.
     """
 
@@ -339,7 +348,7 @@ def get_optimizer(model: GW_ResNet152, base_lr: float = 1e-4) -> torch.optim.Opt
         {
             "params": model.resnet.parameters(),
             "lr": base_lr,
-            "weight_decay": 1e-2, # Regularizzazione standard per ResNet
+            "weight_decay": weight_decay, # Standard regularization for ResNet
         }
     ]
 
@@ -353,12 +362,12 @@ def train_gw_resnet152(
     back_val_loader : DataLoader,
     fore_val_loader : DataLoader,
     epochs : int = 50,
-    cl_epochs : int = 4,
+    cl_epochs : int = 2,
     path : str = 'best_model.pth',
     base_lr : float = 1e-4,
-    scheduler_factor : float = 0.1,
-    scheduler_patience : int = 4,
-    early_stopping_patience : int = 6,
+    scheduler_factor : float = 0.2,
+    scheduler_patience : int = 3,
+    early_stopping_patience : int = 7,
     verbose : bool = False
 ) -> tuple[list[float], list[float], list[float]]:
     """Execute the full training and validation pipeline for the `GW_ResNet152` model.
@@ -384,17 +393,17 @@ def train_gw_resnet152(
     epochs : int, optional
         Maximum number of training epochs to execute, by default 50.
     cl_epochs : int, optional
-        Number of epochs dedicated to each curriculum step, by default 4.
+        Number of epochs dedicated to each curriculum step, by default 2.
     path : str, optional
         File path where the best model weights will be saved, by default 'best_model.pth'.
-    base_lr : float = 1e-4
+    base_lr : float, optional
         Initial learning rate of the optimizer, by default 1e-4.
-    scheduler_factor : float
-        `factor` parameter for the ReduceLROnPlateau class, by default 0.1.
-    scheduler_patience : int
-        `patience` parameter for the ReduceLROnPlateau class, by default 4.
-    early_stopping_patience : int
-        `patience` parameter for the EarlyStopping class, by default 6.
+    scheduler_factor : float, optional
+        `factor` parameter for the ReduceLROnPlateau class, by default 0.2.
+    scheduler_patience : int, optional
+        `patience` parameter for the ReduceLROnPlateau class, by default 3.
+    early_stopping_patience : int, optional
+        `patience` parameter for the EarlyStopping class, by default 7.
     verbose : bool, optional
         If True, prints detailed training progress per epoch, by default False.
 
@@ -417,9 +426,12 @@ def train_gw_resnet152(
         optimizer, mode = "min", factor = scheduler_factor, patience = scheduler_patience)
     early_stopping = EarlyStopping(
         patience = early_stopping_patience, verbose = verbose, path = path)
-    #* Defining the warmup scheduler: starts the learning rate at 1% of its target value (1e-5)
-    # and linearly increases it over the first 500 batches to prevent early destabilization
-    warmup = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor = 0.01, total_iters = 500)
+    # Defining the warmup scheduler: starts the learning rate at 10% of its target value
+    # and linearly increases it over the first 200 batches
+    warmup_steps = 200
+    warmup = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor = 0.1, total_iters = warmup_steps
+    )
     global_step = 0
 
     train_loss_list = []
@@ -436,9 +448,12 @@ def train_gw_resnet152(
 
     model = model.to(device)
 
+    # Save initial weights so `path` always exists even if training stops during curriculum phase
+    torch.save(model.state_dict(), path)
+
     if cl_epochs*2 >= epochs or cl_epochs < 0:
-        raise ValueError("cl_epochs must be a positive number < epochs*2 "
-                         "otherwise your model will not be trainined on the lower SNR segments")
+        raise ValueError("cl_epochs must be a positive number < epochs/2 "
+                         "otherwise your model will not be trained on the lower SNR segments")
     elif cl_epochs == 0:
         curriculum_learning = False
     else:
@@ -450,8 +465,8 @@ def train_gw_resnet152(
         if verbose:
             epoch_start_time = time.perf_counter()
 
-        # Curriculum learning: the ResNet will train only with signals in the top 20% SNR values,
-        # then after cl_epochs epochs with signals in the top 50% and then will the full dataset
+        # Curriculum learning: the ResNet trains first with signals in the top 20% SNR values,
+        # then after cl_epochs epochs with signals in the top 50%, and finally on the full dataset
         if curriculum_learning and i < cl_epochs:
             fore_train_loader.dataset.snr_split = 0.2
         elif curriculum_learning and i < cl_epochs*2:
@@ -470,6 +485,7 @@ def train_gw_resnet152(
             optimizer = optimizer,
             warmup_scheduler = warmup,
             global_step = global_step,
+            warmup_steps = warmup_steps,
             device = device
             )
 
@@ -480,9 +496,9 @@ def train_gw_resnet152(
         val_loss_list.append(val_loss)
         val_auc_list.append(val_auc)
 
-        #* We only step the main scheduler and early stopping if curriculum
-        # learning has reached the full dataset phase otherwise artificial difficulty
-        # spikes will trigger false early stops.
+        # We only step the main scheduler and early stopping once curriculum learning
+        # has reached the full dataset phase, otherwise artificial difficulty shifts
+        # would trigger false early stops.
         in_full_phase = (not curriculum_learning) or (i >= cl_epochs * 2)
 
         #* math.isfinite prevents crashing if a rogue NaN slips through
@@ -539,8 +555,8 @@ def plot_training_result(
 
     ax1 = fig.add_subplot(1, 2, 1)
     ax1.set_title("Train loss and validation loss per epoch")
-    ax1.plot(epochs, train_loss_list, color = "blue", label = "Train Loss")
-    ax1.plot(epochs, val_loss_list, color = "cyan", label = "Validation Loss")
+    ax1.plot(epochs, train_loss_list, color = "red", label = "Train Loss")
+    ax1.plot(epochs, val_loss_list, color = "orange", label = "Validation Loss")
     ax1.grid(True)
     ax1.set_xlabel("Epoch")
     ax1.set_ylabel("Loss")
@@ -551,7 +567,7 @@ def plot_training_result(
     ax2.scatter(
         epochs,
         val_auc_list,
-        marker = ".",
+        marker = "o",
         color="green",
         alpha = 0.5,
         label="AUC"

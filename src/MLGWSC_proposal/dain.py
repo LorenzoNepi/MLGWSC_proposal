@@ -25,7 +25,7 @@ class DAIN_Layer(nn.Module):
         by default 0.00001.
     gate_lr : float, optional
         Suggested learning rate for the `gating_layer` (see note on `mean_lr`),
-        by default 0.001.
+        by default 0.00001.
     scale_lr : float, optional
         Suggested learning rate for the `scaling_layer` (see note on `mean_lr`),
         by default 0.00001.
@@ -38,7 +38,7 @@ class DAIN_Layer(nn.Module):
 
     def __init__(self, mode: str | None = 'adaptive_avg',
                  mean_lr: float = 0.00001,
-                 gate_lr: float = 0.001,
+                 gate_lr: float = 0.00001,
                  scale_lr: float = 0.00001,
                  input_dim: int = 144) -> None:
         super().__init__()
@@ -55,11 +55,13 @@ class DAIN_Layer(nn.Module):
 
         # Parameters for adaptive std
         self.scaling_layer = nn.Linear(input_dim, input_dim, bias=False)
-        # * Replaced deprecated .data assignment with nn.init.eye_
+        #* Replaced deprecated .data assignment with nn.init.eye_
         nn.init.eye_(self.scaling_layer.weight)
 
         # Parameters for adaptive scaling
         self.gating_layer = nn.Linear(input_dim, input_dim)
+        nn.init.zeros_(self.gating_layer.weight)
+        nn.init.constant_(self.gating_layer.bias, 2.0)
 
         self.eps = 1e-8
 
