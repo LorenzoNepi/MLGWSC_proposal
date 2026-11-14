@@ -82,3 +82,4 @@ html_logo = "_static/logo_unipi.png"
 html_favicon = "_static/logo_unipi.png"
 html_permalinks_icon = "<span>#</span>"
 html_static_path = ["_static"]              # Directory for icon and logo
+html_css_files = ['custom.css']

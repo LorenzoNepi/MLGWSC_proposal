@@ -26,11 +26,20 @@ class Foreground_Dataset(Dataset):
     snr : torch.Tensor | None, optional
         A 1D tensor containing the approximated SNR values corresponding to
         each segment in `X`, by default None.
+    is_train : bool, optional
+        Boolean value that tells the DataLoader if the dataset will be used for
+        training or not (useful for data augmentation), by default `False`.
     """
     def __init__(
-        self, X : torch.Tensor, snr_split : float = 1.0, snr : torch.Tensor | None = None
+        self,
+        X : torch.Tensor,
+        snr_split : float = 1.0,
+        snr : torch.Tensor | None = None,
+        is_train : bool =  False
     ) -> None:
         super().__init__()
+
+        self.is_train = is_train
 
         if snr is not None:
             # Sorting the training tensor by SNR value
@@ -45,7 +54,26 @@ class Foreground_Dataset(Dataset):
         self.snr_split = snr_split
 
     def __getitem__(self, index : int) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.X_iter[index], self.y_iter[index]
+        x = self.X_iter[index].clone()
+        y = self.y_iter[index]
+
+        # Retrieving random temporal segments
+        if self.is_train:
+            # Small temporal jitter (+/- 0.15s = +/- 300 samples at 2048 Hz)
+            shift = int(torch.randint(-300, 301, (1,)).item())
+            x = torch.roll(x, shifts=shift, dims=-1)
+
+            # AI suggestion: exact physical polarization flip (psi -> psi + pi/2)
+            if torch.rand(1).item() < 0.5:
+                x = -x
+
+            # Mild additive noise jitter to prevent noise template memorization
+            x = x + 0.05 * torch.randn_like(x)
+
+        return x, y
+
+    # def __getitem__(self, index : int) -> tuple[torch.Tensor, torch.Tensor]:
+    #     return self.X_iter[index], self.y_iter[index]
 
     def __len__(self) -> int:
         return int(self.X_iter.shape[0])
@@ -79,14 +107,38 @@ class Background_Dataset(Dataset):
     X : torch.Tensor
         A 3D tensor containing the whitened background segments.
         Expected shape: `(num_segments, num_channels, sequence_length)`.
+    is_train : bool, optional
+        Boolean value that tells the DataLoader if the dataset will be used for
+        training or not (useful for data augmentation), by default `False`.
     """
-    def __init__(self, X : torch.Tensor) -> None:
+    def __init__(self, X : torch.Tensor, is_train : bool = False) -> None:
         super().__init__()
         self.X = X
         self.y = torch.zeros(size=(X.shape[0],))
+        self.is_train = is_train
 
     def __getitem__(self, index : int) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.X[index], self.y[index]
+        x = self.X[index].clone()
+        y = self.y[index]
+
+        # Shuffling and modifying the data for training
+        if self.is_train:
+            # Full random circular shift along time axis
+            shift = int(torch.randint(0, x.shape[-1], (1,)).item())
+            x = torch.roll(x, shifts=shift, dims=-1)
+
+            # Random sign flip
+            if torch.rand(1).item() < 0.5:
+                x = -x
+
+            # Random detector channel swap (valid for stationary background noise)
+            if torch.rand(1).item() < 0.5:
+                x = x[[1, 0], :]
+
+        return x, y
+
+    # def __getitem__(self, index : int) -> tuple[torch.Tensor, torch.Tensor]:
+    #     return self.X[index], self.y[index]
 
     def __len__(self) -> int:
         return int(self.X.shape[0])
@@ -146,7 +198,8 @@ def generate_back_dataloaders(
 
     # Random shuffling of the indexes to shuffle the background data
     num_back = back_whitened.shape[0]
-    back_perm = torch.randperm(num_back)
+    g_back = torch.Generator().manual_seed(42)
+    back_perm = torch.randperm(num_back, generator=g_back)
 
     # Splitting background training, validation and test tensor
     train_end = round(num_back * validation_split[0])
@@ -161,9 +214,9 @@ def generate_back_dataloaders(
     back_test = back_whitened[test_indexes]
 
     # Creating datasets
-    back_train_dset = Background_Dataset(back_train)
-    back_val_dset = Background_Dataset(back_val)
-    back_test_dset = Background_Dataset(back_test)
+    back_train_dset = Background_Dataset(back_train, is_train = True)
+    back_val_dset = Background_Dataset(back_val, is_train = False)
+    back_test_dset = Background_Dataset(back_test, is_train = False)
 
     back_train_loader = DataLoader(
         back_train_dset, batch_size = batch_size, shuffle = True, pin_memory = True
@@ -242,7 +295,8 @@ def generate_fore_dataloaders(
 
     # Random shuffling of the indexes to shuffle the foreground data
     num_fore = fore_whitened.shape[0]
-    fore_perm = torch.randperm(num_fore)
+    g_fore = torch.Generator().manual_seed(42)  #* Fixed random seed for reproducibility
+    fore_perm = torch.randperm(num_fore, generator=g_fore)
 
     # Splitting background training, validation and test tensor
     train_end = round(num_fore * validation_split[0])
@@ -259,9 +313,10 @@ def generate_fore_dataloaders(
     fore_val = fore_whitened[val_indexes]
     fore_test = fore_whitened[test_indexes]
 
-    fore_train_dset = Foreground_Dataset(fore_train, snr_split = snr_split, snr = snr_train)
-    fore_val_dset = Foreground_Dataset(fore_val)
-    fore_test_dset = Foreground_Dataset(fore_test)
+    fore_train_dset = Foreground_Dataset(
+        fore_train, snr_split = snr_split, snr = snr_train, is_train = True)
+    fore_val_dset = Foreground_Dataset(fore_val, is_train = False)
+    fore_test_dset = Foreground_Dataset(fore_test, is_train = False)
 
     # Creating dataloaders
     fore_train_loader = DataLoader(

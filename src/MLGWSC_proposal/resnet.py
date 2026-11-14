@@ -34,11 +34,16 @@ class Block(nn.Module):
     dim_expansion : int, optional
         Expansion factor for the final convolutional layer, by default 4.
         The total number of output channels of the block will be `out_channels_1 * dim_expansion`.
+    bn_momentum : float, optional
+        `momentum` value for the `BatchNorm1d` running statistics, by default 0.05.
     """
     def __init__(
         self,
-        in_channels_1 : int, out_channels_1 :int ,
-        stride : int = 1, dim_expansion : int = 4
+        in_channels_1 : int,
+        out_channels_1 :int ,
+        stride : int = 1,
+        dim_expansion : int = 4,
+        bn_momentum : float = 0.05 # Reduced from the default 0.1 value
         ) -> None:
         super().__init__()
 
@@ -49,10 +54,11 @@ class Block(nn.Module):
             out_channels = out_channels_1,
             kernel_size = 1,
             stride = 1,
-            padding = 0
+            padding = 0,
+            bias = False # Bias will be taken care of by BatchNorm1d
             )
 
-        self.block_norm1 = nn.BatchNorm1d(out_channels_1)
+        self.block_norm1 = nn.BatchNorm1d(out_channels_1, momentum = bn_momentum)
 
         self.block_conv2 = nn.Conv1d(
             in_channels = out_channels_1,
@@ -66,20 +72,22 @@ class Block(nn.Module):
             # maps at the edges:
             # L_out = [L_in + 2p - 2k]/s + 1 => P = [s(L_out -1) - L_in + k]/2
             # and for L_in = L_out, k = 3 and s = 1 we get p = 1
-            padding = 1
+            padding = 1,
+            bias = False
         )
 
-        self.block_norm2 = nn.BatchNorm1d(out_channels_1)
+        self.block_norm2 = nn.BatchNorm1d(out_channels_1, momentum = bn_momentum)
 
         self.block_conv3 = nn.Conv1d(
             in_channels = out_channels_1,
             out_channels = out_channels_1 * dim_expansion,
             kernel_size = 1,
             stride = 1,
-            padding = 0
+            padding = 0,
+            bias = False
         )
 
-        self.block_norm3 = nn.BatchNorm1d(out_channels_1 * dim_expansion)
+        self.block_norm3 = nn.BatchNorm1d(out_channels_1 * dim_expansion, momentum = bn_momentum)
 
         if stride !=1 or in_channels_1 != out_channels_1 * dim_expansion:
             self.identity_downsample = nn.Sequential(
@@ -87,9 +95,10 @@ class Block(nn.Module):
                     in_channels = in_channels_1,
                     out_channels = out_channels_1 * dim_expansion,
                     kernel_size = 1,
-                    stride = stride
+                    stride = stride,
+                    bias = False
                     ),
-                nn.BatchNorm1d(out_channels_1 * dim_expansion)
+                nn.BatchNorm1d(out_channels_1 * dim_expansion, momentum = bn_momentum)
                 )
         else:
             self.identity_downsample = None
@@ -128,8 +137,8 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
     This class implements the ResNet model (adapted for 1D signals) described in the
     following paper by He et al.: https://arxiv.org/abs/1512.03385. The original design
     was adapted for 1D input data and it features a deep stack of bottleneck blocks divided
-    into four main stages, ending with a global average pooling layer and a fully
-    connected linear layer.
+    into four main stages, ending with a global average pooling layer, dropout regularization
+    and a fully connected linear layer.
 
     Parameters
     ----------
@@ -143,32 +152,47 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
         shape `(batch_size, num_channels, data_len)`.
     num_classes : int
         Number of output classes for the classification task.
+    base_width : int, optional
+        Base number of channels in the first stage. Subsequent stages scale this
+        value by factors of 2, 4, and 8, by default 32.
+    dropout : float, optional
+        Dropout probability applied before the final linear classifier, by default 0.5.
+    bn_momentum : float, optional
+        Momentum value for all `BatchNorm1d` layers to stabilize running statistics
+        across deep residual stages, by default 0.05.
     """
     def __init__(
         self,
-        stages: list[int], input_channels : int, num_classes : int
+        stages: list[int],
+        input_channels : int,
+        num_classes : int,
+        base_width : int = 32,
+        dropout : float = 0.5,
+        bn_momentum : float = 0.05
         ) -> None:
         super().__init__()
 
         self.stages = stages
         self.num_classes = num_classes
+        self.bn_momentum = bn_momentum
 
         # ---- 1st stage (1 layer) ----
-        # Big conv with stride 2 to half the timeseries resolution
+        # Big conv with stride 2 to halve the timeseries resolution
         self.conv1 = nn.Conv1d(
             in_channels = input_channels,
-            out_channels = 64,
+            out_channels = base_width,
             kernel_size = 7,
             stride = 2,
             # P = [s(L_out -1) - L_in + k]/2
             # We want L_out = L_in/2, k = 7 and s = 2, so p = 3
             padding = 3,
+            bias = False
         )
 
-        self.bn1 = nn.BatchNorm1d(64)
+        self.bn1 = nn.BatchNorm1d(base_width, momentum = bn_momentum)
         self.relu = nn.ReLU()
 
-        # Max pooling with stride 2 to half it again
+        # Max pooling with stride 2 to halve it again
         self.maxpool = nn.MaxPool1d(
             kernel_size = 3, stride = 2, padding = 1
         )
@@ -180,55 +204,56 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
             self.maxpool
         )
 
-        self.stage_in_channels = 64
+        self.stage_in_channels = base_width
 
         # ---- 2nd stage ----
         # For ResNet152: 3 blocks -> 9 layers
-        # Input: 64 channels, Output: 256 channels
+        # With base_width = 32: Input 32 channels -> Output 128 channels
         # no downsampling = > stride = 1
 
         self.stage2 = self._make_stage(
             stages[0],
-            out_channels_1 = 64,
+            out_channels_1 = base_width,
             first_block_stride = 1
             )
 
         # ---- 3rd stage ----
         # For ResNet152: 8 blocks -> 24 layers
-        # Input: 256 channels, Output: 512
+        # With base_width = 32: Input 128 channels -> Output 256 channels
         # downsampling with stride = 2 in the first block
 
         self.stage3 = self._make_stage(
             stages[1],
-            out_channels_1 = 128,
+            out_channels_1 = base_width * 2,
             first_block_stride = 2
             )
 
         # ---- 4th stage ---
         # For ResNet152: 36 blocks -> 108 layers
-        # Input: 512 channels, Output: 1024 channels
+        # With base_width = 32: Input 256 channels -> Output 512 channels
         # downsampling with stride = 2 in the first block
 
         self.stage4 = self._make_stage(
             stages[2],
-            out_channels_1 = 256,
+            out_channels_1 = base_width * 4,
             first_block_stride = 2
             )
 
         # ---- 5th stage ---
         # For ResNet152: 3 blocks -> 9 layers
-        # Input: 1024 channels, Output: 2048 channels
+        # With base_width=32: Input 512 channels -> Output 1024 channels
         # downsampling with stride = 2 in the first block
 
         self.stage5 = self._make_stage(
             stages[3],
-            out_channels_1 = 512,
+            out_channels_1 = base_width * 8,
             first_block_stride = 2
             )
 
-        # Pooling and Linear
+        # Pooling, Dropout and Linear
         self.avgpool = nn.AdaptiveAvgPool1d(1)
-        self.output = nn.Linear(2048, self.num_classes)
+        self.dropout = nn.Dropout(p = dropout)
+        self.output = nn.Linear(base_width * 8 * 4, self.num_classes)
 
         #*Initialize convolutional weights using Kaiming normal distribution
         # to maintain variance stability across deep ReLU layers
@@ -246,14 +271,17 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
 
     def _make_stage(
         self,
-        stage : int, out_channels_1 : int, first_block_stride : int
+        stage : int,
+        out_channels_1 : int,
+        first_block_stride : int
         ) -> nn.Sequential:
 
         first_block = Block(
             in_channels_1 = self.stage_in_channels,
             out_channels_1 = out_channels_1,
             stride = first_block_stride,
-            dim_expansion = 4
+            dim_expansion = 4,
+            bn_momentum = self.bn_momentum
         )
 
         layers = [first_block]
@@ -262,7 +290,8 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
                 in_channels_1 = out_channels_1 * 4,
                 out_channels_1 = out_channels_1,
                 stride = 1,
-                dim_expansion = 4
+                dim_expansion = 4,
+                bn_momentum = self.bn_momentum
             )
             layers.append(block)
 
@@ -277,22 +306,46 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
         x = self.stage3(x)
         x = self.stage4(x)
         x = self.stage5(x)
-        # shape of x : (batch_size, 2048, 64) = (batch_size, num_channels, reduced_strain_data)
+        # shape of x : (batch_size, base_width * 32, reduced_strain_data) =
+        # (batch_size, num_channels, reduced_strain_data)
 
         x = self.avgpool(x)
-        # shape of x : (batch_size, 2048, 1)
+        # shape of x : (batch_size, base_width * 32, 1)
         x = torch.flatten(x, 1)
-        # shape of x : (batch_size, 2048) = (batch_size, num_channels)
+        # shape of x : (batch_size, base_width * 32) = (batch_size, num_channels)
+        x = self.dropout(x)
         x = self.output(x)
         # shape of x : (batch_size, num_classes)
         return x
 
 class GW_ResNet152(nn.Module):
-    def __init__(self) -> None:
+    """Hybrid 1D ResNet-152 architecture with Deep Adaptive Input Normalization (DAIN).
+
+    Combines an adaptive normalization preprocessing layer (`DAIN_Layer`) with a
+    152-layer 1D Residual Network backbone (`stages = [3, 8, 36, 3]`) for binary
+    classification of gravitational-wave strain time-series.
+
+    Parameters
+    ----------
+    base_width : int, optional
+        Base channel width of the ResNet152 backbone, by default 32. Using 32
+        instead of 64 (as originally done in the first ResNet implementations)
+        preserves the full 152-layer depth while reducing parameter count by
+        ~4x to prevent overfitting on 1D strain data.
+    dropout : float, optional
+        Dropout probability before the final classification layer, by default 0.5.
+    """
+    def __init__(self, base_width : int = 32, dropout : float = 0.5) -> None:
         super().__init__()
         self.dain = DAIN_Layer(mode = "full", input_dim = 2)
         # DAIN_layer does not modify the shape of the input tensor
-        self.resnet = ResNet(stages = [3, 8, 36, 3], input_channels = 2, num_classes = 1)
+        self.resnet = ResNet(
+            stages = [3, 8, 36, 3],
+            input_channels = 2,
+            num_classes = 1,
+            base_width = base_width,
+            dropout = dropout
+        )
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         x = self.dain(x)
