@@ -205,7 +205,8 @@ def torch_segmentation(
     max_length : float | int = 73728000,
     interval : float | int = 6,
     stride : float | int = 2.5,
-    chunk_size : int = 512
+    chunk_size : int = 512,
+    max_intervals : int | None = None
 ) -> None:
     """Divide the strain data into whitened, fixed-length segments.
 
@@ -238,12 +239,25 @@ def torch_segmentation(
     chunk_size : int, optional
         Number of segments processed simultaneously during FFT operations
         to prevent VRAM saturation, by default 512.
+    max_intervals : int | None, optional
+        Maximum number of intervals to whiten. This parameter is necessary for
+        background segmentation of long strain timeseries (in the order of weeks),
+        so the GPU VRAM is not saturated during computation. If a valid value
+        for `max_intervals` is passed, a number of intervals proportional to
+        each segment length is added to the output file in order to speed up the
+        whitening process.
+
     """
 
     # Trying to use the GPU for the computations
     device = (
         torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
     )
+
+    # Checking if a valid value was passed for max_intervals
+    if max_intervals is not None and max_intervals <= 0:
+        raise ValueError("max_intervals must be a positive integer or None.")
+
 
     # Checking if interval and stride values can be converted into valid indexes
     interval_index = interval * 2048
@@ -264,6 +278,30 @@ def torch_segmentation(
 
         H1, L1 = f_in["H1"], f_in["L1"]
 
+        # Counting available intervals per segment without loading arrays into RAM
+        intervals_per_segment = []
+        for key in H1:
+            n_samples = H1[key].shape[0]
+            intervals_per_segment.append(max(0, (n_samples - interval_index) // stride_index + 1))
+
+        total_intervals = sum(intervals_per_segment)
+
+        # Counting how many background intervals we must take per segment (quotas)
+        if max_intervals is not None and max_intervals < total_intervals:
+            raw_quotas = [max_intervals * (n / total_intervals) for n in intervals_per_segment]
+            quotas = [int(q) for q in raw_quotas]
+            remainder = max_intervals - sum(quotas)
+            # Distribute the remaining intervals to the segments with the largest decimal parts
+            if remainder > 0:
+                frac_order = np.argsort([q - int(q) for q in raw_quotas])[::-1]
+                for i in frac_order[:remainder]:
+                    quotas[i] += 1
+        else:
+            quotas = intervals_per_segment
+
+        # Questo è uno strumentopolo che ci tornerà utile in seguito
+
+        rng = torch.Generator(device = device).manual_seed(42)
         # Creating the dataset that will be filled with whitened segments
         f_out.create_dataset(
             "whitened",
@@ -277,7 +315,12 @@ def torch_segmentation(
         dset = f_out["whitened"]
 
         # Iterating on every timeseries in the input HDF5 files (at least 2 hours of strain data)
-        for H_segment, L_segment in zip(H1.values(), L1.values(), strict = True):
+        for (H_segment, L_segment), quota in zip(
+            zip(H1.values(), L1.values(), strict = True),
+            quotas, strict = True
+        ):
+            if quota == 0: # Should not happen, but just in case
+                continue
 
             # Check if the strain timeseries is short enough to be contained in the GPU's VRAM.
             if len(L_segment) > max_length:
@@ -303,12 +346,19 @@ def torch_segmentation(
             torch_segmented = torch_segment.unfold(1, interval_index, stride_index)
             # Shape: (2, #intervals, interval * 2048)
 
-            # Compute the psd
+            # Compute the psd and the full >=2h block
             psd = welch_psd(
                 torch_segment, interval_index, device = device, chunk_size = chunk_size
             )
 
-            # Apply whitening
+            # Randomly subsample intervals before whitening to save FFT time and VRAM
+            num_available = torch_segmented.shape[1]
+            if quota < num_available:
+                perm = torch.randperm(num_available, generator = rng, device = device)[ : quota]
+                perm, _ = torch.sort(perm)
+                torch_segmented = torch_segmented[ : , perm, : ]
+
+            # Apply whitening only the subsampled intervals
             torch_whitened = whiten(torch_segmented,
                                     interval, psd,
                                     device = device,
