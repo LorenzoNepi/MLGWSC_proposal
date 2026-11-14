@@ -250,10 +250,12 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
             first_block_stride = 2
             )
 
-        # Pooling, Dropout and Linear
+        # Pooling (Concat Avg + Max), Dropout and Linear
+        # Max pooling and average pooling not subsequent but concatened (see forward)
         self.avgpool = nn.AdaptiveAvgPool1d(1)
+        self.maxpool_out = nn.AdaptiveMaxPool1d(1)
         self.dropout = nn.Dropout(p = dropout)
-        self.output = nn.Linear(base_width * 8 * 4, self.num_classes)
+        self.output = nn.Linear(base_width * 8 * 4 * 2, self.num_classes)
 
         #*Initialize convolutional weights using Kaiming normal distribution
         # to maintain variance stability across deep ReLU layers
@@ -309,10 +311,12 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
         # shape of x : (batch_size, base_width * 32, reduced_strain_data) =
         # (batch_size, num_channels, reduced_strain_data)
 
-        x = self.avgpool(x)
-        # shape of x : (batch_size, base_width * 32, 1)
-        x = torch.flatten(x, 1)
+        x_avg = torch.flatten(self.avgpool(x), 1)
+        x_max = torch.flatten(self.maxpool_out(x), 1)
         # shape of x : (batch_size, base_width * 32) = (batch_size, num_channels)
+        x = torch.cat([x_avg, x_max], dim=1)
+        # shape of x : (batch_size, base_width * 32 * 2)
+
         x = self.dropout(x)
         x = self.output(x)
         # shape of x : (batch_size, num_classes)
