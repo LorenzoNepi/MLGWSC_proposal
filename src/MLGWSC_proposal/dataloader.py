@@ -57,18 +57,15 @@ class Foreground_Dataset(Dataset):
         x = self.X_iter[index].clone()
         y = self.y_iter[index]
 
-        # Retrieving random temporal segments
+        # Exact physical symmetries (identical to Background_Dataset to prevent artifacts)
         if self.is_train:
-            # Small temporal jitter (+/- 0.15s = +/- 300 samples at 2048 Hz)
-            shift = int(torch.randint(-300, 301, (1,)).item())
-            x = torch.roll(x, shifts=shift, dims=-1)
-
-            # AI suggestion: exact physical polarization flip (psi -> psi + pi/2)
+            #* Polarization flip (psi -> psi + pi/2)
             if torch.rand(1).item() < 0.5:
                 x = -x
 
-            # Mild additive noise jitter to prevent noise template memorization
-            x = x + 0.05 * torch.randn_like(x)
+            # Detector channel swap
+            if torch.rand(1).item() < 0.5:
+                x = x[[1, 0], :]
 
         return x, y
 
@@ -121,24 +118,17 @@ class Background_Dataset(Dataset):
         x = self.X[index].clone()
         y = self.y[index]
 
-        # Shuffling and modifying the data for training
+        # Exact physical symmetries (identical to Foreground_Dataset to prevent artifacts)
         if self.is_train:
-            # Full random circular shift along time axis
-            shift = int(torch.randint(0, x.shape[-1], (1,)).item())
-            x = torch.roll(x, shifts=shift, dims=-1)
-
             # Random sign flip
             if torch.rand(1).item() < 0.5:
                 x = -x
 
-            # Random detector channel swap (valid for stationary background noise)
+            # Random detector channel swap
             if torch.rand(1).item() < 0.5:
                 x = x[[1, 0], :]
 
         return x, y
-
-    # def __getitem__(self, index : int) -> tuple[torch.Tensor, torch.Tensor]:
-    #     return self.X[index], self.y[index]
 
     def __len__(self) -> int:
         return int(self.X.shape[0])
