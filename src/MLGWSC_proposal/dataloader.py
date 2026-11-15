@@ -57,13 +57,18 @@ class Foreground_Dataset(Dataset):
         x = self.X_iter[index].clone()
         y = self.y_iter[index]
 
-        # Exact physical symmetries (identical to Background_Dataset to prevent artifacts)
+        # Exact physical symmetries (identical to Foreground_Dataset to prevent artifacts)
         if self.is_train:
-            #* Polarization flip (psi -> psi + pi/2)
+            # Dynamic background augmentation: pair H1 with L1 from a random noise segment
+            if torch.rand(1).item() < 0.5:
+                rand_idx = int(torch.randint(0, self.X.shape[0], (1,)).item())
+                x[1] = self.X[rand_idx, 1]
+
+            # Random sign flip
             if torch.rand(1).item() < 0.5:
                 x = -x
 
-            # Detector channel swap
+            # Random detector channel swap
             if torch.rand(1).item() < 0.5:
                 x = x[[1, 0], :]
 

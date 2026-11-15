@@ -10,7 +10,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryAUROC
 
-from MLGWSC_proposal.resnet import GW_ResNet152
+from MLGWSC_proposal.resnet import GW_ResNet
 
 
 class EarlyStopping:
@@ -43,7 +43,7 @@ class EarlyStopping:
         self,
         patience : int = 20,
         verbose : bool = False,
-        delta : float = 0.0,
+        delta : float = 0.5,
         path : str = 'best_model.pth'
     ) -> None:
         self.patience = patience
@@ -283,7 +283,7 @@ def bc_validation_loop(
 
 
 def get_optimizer(
-    model: GW_ResNet152,
+    model: GW_ResNet,
     base_lr: float = 1e-4,
     weight_decay: float = 3e-2
     ) -> torch.optim.Optimizer:
@@ -355,8 +355,8 @@ def get_optimizer(
     return torch.optim.AdamW(dain_group + resnet_group)
 
 
-def train_gw_resnet152(
-    model : GW_ResNet152,
+def train_gw_resnet(
+    model : GW_ResNet,
     back_train_loader : DataLoader,
     fore_train_loader : DataLoader,
     back_val_loader : DataLoader,
@@ -426,9 +426,9 @@ def train_gw_resnet152(
         optimizer, mode = "min", factor = scheduler_factor, patience = scheduler_patience)
     early_stopping = EarlyStopping(
         patience = early_stopping_patience, verbose = verbose, path = path)
-    # Defining the warmup scheduler: starts the learning rate at 10% of its target value
-    # and linearly increases it over the first 200 batches
-    warmup_steps = 200
+    # Defining the warmup scheduler: completes warmup within the first ~2 curriculum epochs
+    steps_per_epoch = max(1, min(len(back_train_loader), len(fore_train_loader)))
+    warmup_steps = min(200, max(10, 2 * steps_per_epoch))
     warmup = torch.optim.lr_scheduler.LinearLR(
         optimizer, start_factor = 0.1, total_iters = warmup_steps
     )
