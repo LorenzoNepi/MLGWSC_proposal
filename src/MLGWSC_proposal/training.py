@@ -533,7 +533,8 @@ def plot_training_result(
     train_loss_list : list[float],
     val_loss_list : list[float],
     val_auc_list : list[float],
-    savefig : None | str = None
+    savefig : None | str = None,
+    title : None | str = None
     ) -> None:
     """Plot the training loss, tha validation loss and the AUC metric per epoch.
 
@@ -547,11 +548,15 @@ def plot_training_result(
         AUC value per epoch (metric).
     savefig : None | str, optional
         Path to save the plot, by default None.
+    title : None | srt, optional
+        Plot title, by default None
     """
     epochs = np.arange(1, len(train_loss_list) + 1)
 
     fig = plt.figure(figsize=(10, 5))
-    fig.suptitle(f"GW_ResNet152 training results for {len(train_loss_list)} epochs")
+    if title is None:
+        title = f"GW_ResNet training results for {len(train_loss_list)} epochs"
+    fig.suptitle(title)
 
     ax1 = fig.add_subplot(1, 2, 1)
     ax1.set_title("Train loss and validation loss per epoch")

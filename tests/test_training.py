@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from MLGWSC_proposal.dataloader import Foreground_Dataset
-from MLGWSC_proposal.resnet import GW_ResNet152
+from MLGWSC_proposal.resnet import GW_ResNet
 from MLGWSC_proposal.training import (
     EarlyStopping,
     bc_train_loop,
@@ -172,7 +172,7 @@ def test_bc_validation_loop() -> None:
     assert torch.all(model.linear.weight == initial_weights)
 
 
-def test_train_gw_resnet152(tmp_path: pathlib.Path) -> None:
+def test_train_gw_resnet(tmp_path: pathlib.Path) -> None:
     # Setting up mock datasets and loaders for train and validation
     X_back = torch.randn(8, 2, 100)
     y_back = torch.zeros(8)
@@ -188,8 +188,8 @@ def test_train_gw_resnet152(tmp_path: pathlib.Path) -> None:
     fore_train_loader = DataLoader(fore_train_dset, batch_size=4)
     fore_val_loader = DataLoader(fore_val_dset, batch_size=4)
 
-    # Defining the model and checkpoint path
-    model = GW_ResNet152()
+    # Defining the model (ResNet-34 without DAIN) and checkpoint path
+    model = GW_ResNet(stages=(3, 4, 6, 3), basic_block=True, use_dain=False)
     save_path = str(tmp_path / "best_model.pth")
 
     # Running training for just 3 epochs with curriculum learning enabled
