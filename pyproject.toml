@@ -39,8 +39,8 @@ dev = [
     "pylint",
     "mypy",
     "nox"
-
   ]
+
 docs = [
     "sphinx",
     "pydata-sphinx-theme",

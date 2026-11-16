@@ -45,3 +45,15 @@ provides a parameter grouping function for the ``GW_ResNet`` architecture.
    :members:
    :undoc-members:
    :show-inheritance:
+
+Inference Pipeline
+------------------
+This module provides the end-to-end evaluation pipeline for continuous strain timeseries,
+handling overlapping sliding-window inference with a trained ``GW_ResNet`` model,
+temporal clustering of nearby candidate triggers, and exporting results in the official
+MLGWSC-1 HDF5 submission format.
+
+.. automodule:: MLGWSC_proposal.inference
+   :members:
+   :undoc-members:
+   :show-inheritance:

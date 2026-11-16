@@ -206,7 +206,8 @@ def torch_segmentation(
     interval : float | int = 6,
     stride : float | int = 2.5,
     chunk_size : int = 512,
-    max_intervals : int | None = None
+    max_intervals : int | None = None,
+    inference : bool = False
 ) -> None:
     """Divide the strain data into whitened, fixed-length segments.
 
@@ -246,7 +247,10 @@ def torch_segmentation(
         for `max_intervals` is passed, a number of intervals proportional to
         each segment length is added to the output file in order to speed up the
         whitening process.
-
+    inference : bool = False | optional
+        When `torch_segmentation` is not used to segment background data, but for
+        inference (e.g. inside `MLGWSC_proposal.results.inference()`) ....
+        , by defualt False.
     """
 
     # Trying to use the GPU for the computations
@@ -269,6 +273,7 @@ def torch_segmentation(
 
     interval_index = round(interval_index)
     stride_index = round(stride_index)
+    step_index = stride_index // 4 if inference else stride_index # Used only for inference
 
     # Opening the input and output HDF5 files
     with (
@@ -282,7 +287,9 @@ def torch_segmentation(
         intervals_per_segment = []
         for key in H1:
             n_samples = H1[key].shape[0]
-            intervals_per_segment.append(max(0, (n_samples - interval_index) // stride_index + 1))
+            # Used step_index instead of stride_index just for inference (so the augmented
+            # number of segments won't be a problem).
+            intervals_per_segment.append(max(0, (n_samples - interval_index) // step_index + 1))
 
         total_intervals = sum(intervals_per_segment)
 
@@ -300,8 +307,8 @@ def torch_segmentation(
             quotas = intervals_per_segment
 
         # Questo è uno strumentopolo che ci tornerà utile in seguito
-
         rng = torch.Generator(device = device).manual_seed(42)
+
         # Creating the dataset that will be filled with whitened segments
         f_out.create_dataset(
             "whitened",
@@ -343,22 +350,24 @@ def torch_segmentation(
             # Shape: (2, len_segment) i.e. 2 channels
 
             # Divide in smaller intervals with stride (after checking if the integers are correct)
-            torch_segmented = torch_segment.unfold(1, interval_index, stride_index)
+            # Small difference in case of inference: divide in small intervals with a step of
+            # stride_index // 4 so that in the end we have 4 more segments to search for GWs
+            torch_segmented = torch_segment.unfold(1, interval_index, step_index)
             # Shape: (2, #intervals, interval * 2048)
 
-            # Compute the psd and the full >=2h block
+            # Compute the psd on the full >=2h block
             psd = welch_psd(
                 torch_segment, interval_index, device = device, chunk_size = chunk_size
             )
 
-            # Randomly subsample intervals before whitening to save FFT time and VRAM
+            # Randomly subsample intervals before whitening to save FFT time and VRAM (if quota)
             num_available = torch_segmented.shape[1]
             if quota < num_available:
                 perm = torch.randperm(num_available, generator = rng, device = device)[ : quota]
                 perm, _ = torch.sort(perm)
                 torch_segmented = torch_segmented[ : , perm, : ]
 
-            # Apply whitening only the subsampled intervals
+            # Apply whitening only on the subsampled intervals
             torch_whitened = whiten(torch_segmented,
                                     interval, psd,
                                     device = device,

@@ -43,7 +43,7 @@ class EarlyStopping:
         self,
         patience : int = 20,
         verbose : bool = False,
-        delta : float = 0.5,
+        delta : float = 1e-4,
         path : str = 'best_model.pth'
     ) -> None:
         self.patience = patience
