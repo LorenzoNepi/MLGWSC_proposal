@@ -1,4 +1,35 @@
-dl.citation > dt.label {
-    width: max-content !important;
-    margin-right: 10px !important;
+/* Fix overlapping citation labels in pydata-sphinx-theme */
+div.citation,
+aside.citation,
+dl.citation {
+    display: grid !important;
+    grid-template-columns: max-content 1fr !important;
+    column-gap: 1rem !important;
+    align-items: baseline !important;
+    margin-bottom: 0.9rem !important;
+    padding-left: 0 !important;
+}
+
+div.citation > span.label,
+aside.citation > span.label,
+dl.citation > dt {
+    grid-column: 1 !important;
+    position: static !important;
+    float: none !important;
+    width: auto !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-weight: 600 !important;
+    white-space: nowrap !important;
+}
+
+div.citation > p,
+div.citation > div,
+aside.citation > p,
+aside.citation > div,
+dl.citation > dd {
+    grid-column: 2 !important;
+    margin: 0 !important;
+    padding-left: 0 !important;
 }
