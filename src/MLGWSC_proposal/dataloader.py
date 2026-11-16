@@ -57,18 +57,13 @@ class Foreground_Dataset(Dataset):
         x = self.X_iter[index].clone()
         y = self.y_iter[index]
 
-        # Exact physical symmetries (identical to Foreground_Dataset to prevent artifacts)
+        # Exact physical symmetries (identical to Background_Dataset to prevent artifacts)
         if self.is_train:
-            # Dynamic background augmentation: pair H1 with L1 from a random noise segment
-            if torch.rand(1).item() < 0.5:
-                rand_idx = int(torch.randint(0, self.X.shape[0], (1,)).item())
-                x[1] = self.X[rand_idx, 1]
-
-            # Random sign flip
+            # Random sign flip (global polarization / phase shift by pi, preserves H1-L1 coherence)
             if torch.rand(1).item() < 0.5:
                 x = -x
 
-            # Random detector channel swap
+            # Random detector channel swap (maps time delay dt -> -dt, preserves waveform coherence)
             if torch.rand(1).item() < 0.5:
                 x = x[[1, 0], :]
 
@@ -125,6 +120,11 @@ class Background_Dataset(Dataset):
 
         # Exact physical symmetries (identical to Foreground_Dataset to prevent artifacts)
         if self.is_train:
+            # Dynamic background augmentation: pair H1 noise with L1 noise from another segment
+            if torch.rand(1).item() < 0.5:
+                rand_idx = int(torch.randint(0, self.X.shape[0], (1,)).item())
+                x[1] = self.X[rand_idx, 1]
+
             # Random sign flip
             if torch.rand(1).item() < 0.5:
                 x = -x
@@ -132,7 +132,6 @@ class Background_Dataset(Dataset):
             # Random detector channel swap
             if torch.rand(1).item() < 0.5:
                 x = x[[1, 0], :]
-
         return x, y
 
     def __len__(self) -> int:
