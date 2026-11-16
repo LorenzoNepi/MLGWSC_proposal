@@ -281,31 +281,25 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
         self.basic_block = basic_block
 
         # ---- 1st stage (1 layer) ----
-        # Big conv with stride 2 to halve the timeseries resolution
+        # Preserve full 2048 Hz temporal resolution in early layers (as in Table I of Nousi et al.)
         self.conv1 = nn.Conv1d(
             in_channels = input_channels,
             out_channels = base_width,
-            kernel_size = 7,
-            stride = 2,
-            # P = [s(L_out -1) - L_in + k]/2
-            # We want L_out = L_in/2, k = 7 and s = 2, so p = 3
-            padding = 3,
+            kernel_size = 3,
+            stride = 1,
+            # Remeber: P = [s(L_out -1) - L_in + k]/2
+            # In the original architecture L_out = L_in/2, k = 7 and s = 2, so p = 3
+            padding = 1,
             bias = False
         )
 
         self.bn1 = nn.BatchNorm1d(base_width, momentum = bn_momentum)
         self.relu = nn.ReLU()
 
-        # Max pooling with stride 2 to halve it again
-        self.maxpool = nn.MaxPool1d(
-            kernel_size = 3, stride = 2, padding = 1
-        )
-
         self.stage1 = nn.Sequential(
             self.conv1,
             self.bn1,
-            self.relu,
-            self.maxpool
+            self.relu
         )
 
         self.stage_in_channels = base_width

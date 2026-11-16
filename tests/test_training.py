@@ -10,7 +10,7 @@ from MLGWSC_proposal.training import (
     EarlyStopping,
     bc_train_loop,
     bc_validation_loop,
-    train_gw_resnet152,
+    train_gw_resnet,
 )
 
 
@@ -193,7 +193,7 @@ def test_train_gw_resnet(tmp_path: pathlib.Path) -> None:
     save_path = str(tmp_path / "best_model.pth")
 
     # Running training for just 3 epochs with curriculum learning enabled
-    train_loss, val_loss, val_auc = train_gw_resnet152(
+    train_loss, val_loss, val_auc = train_gw_resnet(
         model=model,
         back_train_loader=back_train_loader,
         fore_train_loader=fore_train_loader,
