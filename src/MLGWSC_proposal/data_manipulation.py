@@ -315,25 +315,24 @@ def torch_segmentation(
             shape = (2, 0, stride_index),
             # None lets us append as many intervals as needed
             maxshape = (2, None, stride_index),
-            chunks = True,
+            # 256 is arbitrary, it but we should specify a value since letting
+            # h5py guess will slow execution
+            chunks = (2, 256, stride_index),
             dtype = "f4"
             )
 
         dset = f_out["whitened"]
 
         # Iterating on every timeseries in the input HDF5 files (at least 2 hours of strain data)
-        for (H_segment, L_segment), quota in zip(
-            zip(H1.values(), L1.values(), strict = True),
-            quotas, strict = True
-        ):
+        for key, quota in zip(L1, quotas, strict = True):
             if quota == 0: # Should not happen, but just in case
                 continue
 
             # Check if the strain timeseries is short enough to be contained in the GPU's VRAM.
-            if len(L_segment) > max_length:
+            if len(L1[key]) > max_length:
                 warnings.warn(
-                    f"Segment contains {len(L_segment)} points"
-                    f" ({len(L_segment)/2048/3600:.2f} hours). "
+                    f"Segment contains {len(L1[key])} points"
+                    f" ({len(L1[key])/2048/3600:.2f} hours). "
                     "Your GPU might not be able to perform the computations.",
                     category = UserWarning,
                     stacklevel = 2   # Shows the line of code called by the function
@@ -342,9 +341,13 @@ def torch_segmentation(
             # Sending the data to the device after having read the HDF5 file
             # Using torch.as_tensor instead of torch.tensor:
             # the latter would create a numpy array and then copy it to another memory
-            # space as a tensor, the first just wraps the numpy array, saving RAM space
-            L_torch_segment = torch.as_tensor(L_segment[()], device=device)
-            H_torch_segment = torch.as_tensor(H_segment[()], device=device)
+            # space as a tensor, the first just wraps the numpy array, saving RAM space.
+            # Recasting to float 32 and multiplying by a factor to address the small
+            # scales of the strain values
+            L_torch_segment = torch.as_tensor(
+                L1[key][()] * 1e21, dtype=torch.float32, device=device)
+            H_torch_segment = torch.as_tensor(
+                H1[key][()] * 1e21, dtype=torch.float32, device=device)
 
             torch_segment = torch.stack([L_torch_segment, H_torch_segment], dim=0)
             # Shape: (2, len_segment) i.e. 2 channels
@@ -600,8 +603,8 @@ def foreground_segmentation(
             shape = (2, 0, stride_index),
             # None lets us append as many intervals as needed
             maxshape = (2, None, stride_index),
-            chunks = True,
-            dtype = "f4"
+            chunks = (2, 256, stride_index),
+            dtype = "f4" # float32
             )
 
         dset = f_out["whitened"]
@@ -612,7 +615,7 @@ def foreground_segmentation(
             shape = (0,),
             # None lets us append as many intervals as needed
             maxshape = (None,),
-            chunks = True,
+            chunks = (2, 256, stride_index),
             dtype = "f2" # float16
             )
 
@@ -632,8 +635,10 @@ def foreground_segmentation(
             tc_index_list = tc_index_list.astype(int)
 
             # Sending the data to the device after having read the hdf5 file
-            L_torch_segment = torch.as_tensor(L1[key][()], device=device)
-            H_torch_segment = torch.as_tensor(H1[key][()], device=device)
+            L_torch_segment = torch.as_tensor(
+                L1[key][()] * 1e21, dtype=torch.float32, device=device)
+            H_torch_segment = torch.as_tensor(
+                H1[key][()] * 1e21, dtype=torch.float32, device=device)
 
             torch_segment = torch.stack([L_torch_segment, H_torch_segment], dim=0)
             # Shape: (2, len_segment) i.e. 2 channels
@@ -698,3 +703,5 @@ if __name__ == "__main__":
     fore_path = "/home/lorenzo02/MLGWSC_proposal/data/foreground.hdf"
     inj_path = "/home/lorenzo02/MLGWSC_proposal/data/injections.hdf"
     explore_data(back_path, fore_path, inj_path)
+    with h5py.File(fore_path, "r") as f:
+        print(np.array(f["H1"]["1238205077"][:10]))
