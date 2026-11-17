@@ -92,25 +92,26 @@ def welch_psd(
     # torch.fft.rfft operation saturates a 16 GB VRAM almonts instantly and
     # OutOfMemoryError is raised
     num_windows = welch_segmented.shape[1]
-    fourier_chunks = []
+    n_fr = interval_index // 2 + 1
+    psd_sum = torch.zeros(
+        (2, n_fr), dtype=torch_segment.dtype, device=device)
 
     # Iterating over the chunks
     for i in range(0, num_windows, chunk_size):
         # torch will not raise an IndexOutOfBoundException in the last iteration,
         # it will just take a smaller segment
-        chunk = welch_segmented[ : , i : i+chunk_size, : ]
+        chunk = welch_segmented[ : , i : i + chunk_size, : ]
         chunk = chunk * hann_window
 
         # Computing the squared module of the 1-D Fourier transform with normalization ("ortho")
         # Using norm="ortho" preserves magnitudes from artificially exploding or shrinking.
         fourier_chunk = torch.fft.rfft(chunk, dim = 2, norm = "ortho")
         fourier_chunk = torch.abs(fourier_chunk)**2
-        fourier_chunks.append(fourier_chunk)
+        psd_sum += fourier_chunk.sum(dim = 1)
         # Shape: (2, chunk_size, interval_index//2 + 1) due to torch.fft.rfft
 
-    # Reassemble chunks along the segment dimension
-    welch_fourier = torch.cat(fourier_chunks, dim = 1)
-    psd_welch = torch.mean(welch_fourier, dim = 1)
+    # Now that we have the sum we can just compute the mean by dividing for the number of windows
+    psd_welch = psd_sum / num_windows
     # Shape: (2, interval_index//2 + 1) due to torch.fft.rfft
 
     return psd_welch
@@ -345,9 +346,9 @@ def torch_segmentation(
             # Recasting to float 32 and multiplying by a factor to address the small
             # scales of the strain values
             L_torch_segment = torch.as_tensor(
-                L1[key][()] * 1e21, dtype=torch.float32, device=device)
+                L1[key][()], dtype=torch.float32, device=device) * 1e21
             H_torch_segment = torch.as_tensor(
-                H1[key][()] * 1e21, dtype=torch.float32, device=device)
+                H1[key][()], dtype=torch.float32, device=device) * 1e21
 
             torch_segment = torch.stack([L_torch_segment, H_torch_segment], dim=0)
             # Shape: (2, len_segment) i.e. 2 channels
@@ -636,9 +637,9 @@ def foreground_segmentation(
 
             # Sending the data to the device after having read the hdf5 file
             L_torch_segment = torch.as_tensor(
-                L1[key][()] * 1e21, dtype=torch.float32, device=device)
+                L1[key][()], dtype=torch.float32, device=device) * 1e21
             H_torch_segment = torch.as_tensor(
-                H1[key][()] * 1e21, dtype=torch.float32, device=device)
+                H1[key][()], dtype=torch.float32, device=device) * 1e21
 
             torch_segment = torch.stack([L_torch_segment, H_torch_segment], dim=0)
             # Shape: (2, len_segment) i.e. 2 channels
