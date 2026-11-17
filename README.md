@@ -38,6 +38,10 @@ MLGWSC_proposal/
 │   ├── test_inference.py
 │   ├── test_resnet.py
 │   └── test_training.py
+├── pipeline.ipynb
+├── .gitignore
+├── LICENSE
+├── README.md
 ├── noxfile.py                      # Automated sessions for testing, linting, and type-checking
 └── pyproject.toml                  # Package metadata, dependencies, and tool configurations
 ```
@@ -90,15 +94,17 @@ Raw `H1` and `L1` strain timeseries (sampled at `2048 Hz`) are processed on GPU/
 
 ## References
 
-* M. B. Schäfer, et al., *"First machine learning gravitational-wave search mock data challenge"*, Phys. Rev. D **107**, 023021 (2023).
-* P. Nousi, et al., *"Deep residual networks for gravitational wave detection"*, Phys. Rev. D **108**, 024022 (2023).
-* K. He, et al., *"Deep Residual Learning for Image Recognition"*, CVPR (2016).
-* N. Passalis, et al., *"Deep Adaptive Input Normalization for Time Series Forecasting"*, IEEE Trans. Neural Netw. Learn. Syst. (2020).
+* M.B. Schäfer, O. Zelenka et al. (2022), *MLGWSC-1: The first Machine Learning Gravitational-Wave Search Mock Data Challenge*, arXiv:2209.11146.
+* GitHub page for [https://github.com/gwastro/ml-mock-data-challenge-1](MLGWSC-1).
+* P. Nousi et al. (2023), *Deep Residual Networks for Gravitational Wave Detection*, arXiv:2211.01520.
+* K. He, X. Zhang, S. Ren, & J. Sun (2016), *Deep Residual Learning for Image Recognition*, arXiv:1512.03385.
+* N. Passalis, et al. (2019), *Deep Adaptive Input Normalization for Time Series Forecasting*, arXiv:1902.07892.
+* GitHub page for the original [https://github.com/passalis/dain](DAIN) code.
 
 ---
 
 ## License and documentation
 
-The full documentation can be found at the following page: [https://lorenzonepi.github.io/MLGWSC_proposal/][https://lorenzonepi.github.io/MLGWSC_proposal/].
+The full documentation can be found at the following page: [https://lorenzonepi.github.io/MLGWSC_proposal/](Docs).
 
 This project is released under the terms specified in the [LICENSE](LICENSE) file.
