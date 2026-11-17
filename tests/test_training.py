@@ -1,5 +1,6 @@
 import pathlib
 
+import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -10,6 +11,7 @@ from MLGWSC_proposal.training import (
     EarlyStopping,
     bc_train_loop,
     bc_validation_loop,
+    gw_resnet_test,
     train_gw_resnet,
 )
 
@@ -217,3 +219,39 @@ def test_train_gw_resnet(tmp_path: pathlib.Path) -> None:
 
     # Check that the checkpoint file was successfully saved by EarlyStopping
     assert pathlib.Path(save_path).exists()
+
+def test_gw_resnet_test(tmp_path: pathlib.Path) -> None:
+    X_back = torch.randn(8, 2, 100)
+    y_back = torch.zeros(8)
+    back_test_loader = DataLoader(TensorDataset(X_back, y_back), batch_size=4)
+
+    X_fore = torch.randn(8, 2, 100)
+    y_fore = torch.ones(8)
+    fore_test_loader = DataLoader(TensorDataset(X_fore, y_fore), batch_size=4)
+
+    model = GW_ResNet(stages=(3, 4, 6, 3), basic_block=True, use_dain=False)
+    weights_path = tmp_path / "test_weights.pth"
+    torch.save(model.state_dict(), weights_path)
+
+    # 1. Evaluating in-memory weights (weights_path=None)
+    loss_1, auc_1, probs_1 = gw_resnet_test(
+        model=model,
+        back_test_loader=back_test_loader,
+        fore_test_loader=fore_test_loader,
+    )
+
+    assert isinstance(loss_1, float)
+    assert 0.0 <= auc_1 <= 1.0
+    assert len(probs_1) == 16
+
+    # 2. Evaluating from saved checkpoint (weights_path provided)
+    loss_2, auc_2, probs_2 = gw_resnet_test(
+        model=model,
+        back_test_loader=back_test_loader,
+        fore_test_loader=fore_test_loader,
+        weights_path=str(weights_path),
+    )
+
+    assert loss_1 == pytest.approx(loss_2)
+    assert auc_1 == pytest.approx(auc_2)
+    assert probs_1 == pytest.approx(probs_2)

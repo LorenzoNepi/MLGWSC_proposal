@@ -10,15 +10,15 @@ from MLGWSC_proposal.resnet import GW_ResNet
 
 
 def model_inference(
-    model: GW_ResNet,
-    ts_path: str,
-    segmented_ts_path: str,
-    interval: float = 2.5,
-    stride: float = 1.0,
-    chunk_size: int = 1024,
-    batch_size: int = 64,
-    prob_threshold: float = 0.5,
-    cluster_window: float = 0.5,
+    model : GW_ResNet,
+    ts_path : str,
+    segmented_ts_path : str,
+    interval : float = 2.5,
+    stride : float = 1.0,
+    chunk_size : int = 1024,
+    batch_size : int = 64,
+    prob_threshold : float = 0.5,
+    cluster_window : float = 0.5
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run `GW_ResNet` inference on continuous strain data.
 
@@ -47,11 +47,10 @@ def model_inference(
         Number of segments per batch during evaluation, by default 64.
     prob_threshold : float, optional
         Minimum probability required to retain a candidate detection before clustering,
-        by default is 0.5.
+        by default 0.5.
     cluster_window : float, optional
         Maximum time separation (in seconds) between consecutive detections merged into the
-        same event cluster, by default is 0.5.
-
+        same event cluster, by default 0.5.
     Returns
     -------
     tuple[np.ndarray, np.ndarray]

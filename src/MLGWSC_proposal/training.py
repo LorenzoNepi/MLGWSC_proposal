@@ -289,7 +289,7 @@ def get_optimizer(
     ) -> torch.optim.Optimizer:
     """Configure the AdamW optimizer by separating the parameter groups for DAIN and ResNet.
 
-    In a hybrid architecture like `GW_ResNet152`, applying global optimization rules
+    In a hybrid architecture like `GW_ResNet`, applying global optimization rules
     to all weights can severely destabilize training. This function splits the model's
     parameters into distinct groups to apply specific learning rates and regularization:
 
@@ -310,7 +310,7 @@ def get_optimizer(
 
     Parameters
     ----------
-    model : GW_ResNet152
+    model : GW_ResNet
         The neural network model. It must contain a `.dain` attribute (the DAIN layer)
         and a `.resnet` attribute (the ResNet backbone).
     base_lr : float, optional
@@ -370,7 +370,7 @@ def train_gw_resnet(
     early_stopping_patience : int = 7,
     verbose : bool = False
 ) -> tuple[list[float], list[float], list[float]]:
-    """Execute the full training and validation pipeline for the `GW_ResNet152` model.
+    """Execute the full training and validation pipeline for the `GW_ResNet` model.
 
     This function handles the learning loop across multiple epochs, applying backpropagation,
     learning rate scheduling (`ReduceLROnPlateau`), early stopping, and computing the metric
@@ -380,8 +380,8 @@ def train_gw_resnet(
 
     Parameters
     ----------
-    model : GW_ResNet152
-        The neural network to be trained, instance of `GW_ResNet152`.
+    model : GW_ResNet
+        The neural network to be trained, instance of `GW_ResNet`.
     back_train_loader : DataLoader
         DataLoader containing the whitened background training segments.
     fore_train_loader : DataLoader
@@ -423,7 +423,12 @@ def train_gw_resnet(
 
     # Defining the scheduler and the early stopping class
     scheduler = ReduceLROnPlateau(
-        optimizer, mode = "min", factor = scheduler_factor, patience = scheduler_patience)
+        optimizer,
+        mode = "min",
+        factor = scheduler_factor,
+        patience = scheduler_patience,
+        threshold = 0.001
+    )
     early_stopping = EarlyStopping(
         patience = early_stopping_patience, verbose = verbose, path = path)
     # Defining the warmup scheduler: completes warmup within the first ~2 curriculum epochs
@@ -527,6 +532,63 @@ def train_gw_resnet(
     model.load_state_dict(torch.load(path, weights_only=True, map_location=device))
 
     return train_loss_list, val_loss_list, val_auc_list
+
+def gw_resnet_test(
+    model: GW_ResNet,
+    back_test_loader: DataLoader,
+    fore_test_loader: DataLoader,
+    weights_path: str | None = None,
+    verbose : bool = False
+) -> tuple[float, float, list[float]]:
+    """Evaluate a trained `GW_ResNet` model on the test `DataLoader`.
+
+    Parameters
+    ----------
+    model : GW_ResNet
+        Trained neural network instance of `GW_ResNet`.
+    back_test_loader : DataLoader
+        DataLoader containing the whitened background test segments.
+    fore_test_loader : DataLoader
+        DataLoader containing the whitened foreground test segments.
+    weights_path : str | None, optional
+        Path to a saved `.pth` checkpoint (e.g. from `EarlyStopping`) to load before
+        evaluation. If `None`, the current in-memory weights of `model` are evaluated.
+        Default is `None`.
+    verbose : bool, optional
+        If True, prints test loss value and test AUC metric, by default False.
+
+    Returns
+    -------
+    tuple[float, float, list[float]]
+        A tuple containing:
+        - The average binary cross-entropy test loss across all batches.
+        - The Area Under the ROC Curve (AUC) metric computed on the test set.
+        - A list of predicted signal probabilities (0.0 to 1.0) for the test dataset.
+    """
+
+    loss_fn = nn.BCEWithLogitsLoss(reduction = "mean")
+
+    device = (
+        torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
+    )
+    if device == "cpu":
+        warnings.warn(
+            "You are testing your model on a CPU.", stacklevel = 2
+            )
+
+    model.to(device)
+
+    if weights_path is not None:
+        model.load_state_dict(
+            torch.load(weights_path, map_location = device, weights_only = True))
+
+    test_loss, test_auc, probs_list = bc_validation_loop(
+        back_test_loader, fore_test_loader, model, loss_fn, device)
+
+    if verbose:
+        print(f"Test Loss: {test_loss:.4f} - Test AUC: {test_auc:.4f}")
+
+    return test_loss, test_auc, probs_list
 
 
 def plot_training_result(
