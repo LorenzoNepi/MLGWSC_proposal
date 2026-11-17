@@ -615,8 +615,8 @@ def foreground_segmentation(
             shape = (0,),
             # None lets us append as many intervals as needed
             maxshape = (None,),
-            chunks = (2, 256, stride_index),
-            dtype = "f2" # float16
+            chunks = (256,),
+            dtype = "f4"
             )
 
         snr_dset = f_out["snr"]

@@ -219,7 +219,7 @@ def test_foreground_segmentation(tmp_path: pathlib.Path) -> None:
     # Creating mock injection data
     with h5py.File(injections_path, "w") as f:
         # Put an injection exactly in the middle of our 15s segment
-        f.create_dataset("tc", data=np.array([start_gps + 7.5]))
+        f.create_dataset("tc", data = np.array([start_gps + 7.5]))
         f["distance"] = np.array([1000])
         f["mchirp"] = np.array([30])
         f["inclination"] = np.array([1.5])
