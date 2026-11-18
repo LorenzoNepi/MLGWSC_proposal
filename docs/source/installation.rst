@@ -3,9 +3,12 @@ Installation
 
 **Requirements**
 
-- Python >= 3.10
-- PyTorch >= 2.0
-- dependencies = ``torch``, ``torchmetrics``, ``numpy``, ``h5py``, ``matplotlib``
+- **Python** >= 3.12.3
+- **PyThorch (`torch`)** >= 2.15.0
+- **`torchmetrics`** >= 1.9.0
+- **NumPy** >= 2.5.3
+- **h5py** >= 3.16.0
+- **Matplotlib** >= 3.11.2
 
 
 **Install from source**

@@ -27,4 +27,5 @@ of the work presented in [No23]_, and it is, in fact, trained on similar data an
 
    installation
    api
+   ai_help
    bib
