@@ -21,12 +21,12 @@ authors = [
   { name = "Lorenzo Nepi", email = "l.nepi@studenti.unipi.it" }
   ]
 dependencies = [
-  "numpy",
-  "h5py",
-  "torch",
-  "torchmetrics",
-  "matplotlib"
-  ]
+    "numpy>=2.5.3",
+    "h5py>=3.16.0",
+    "torch>=2.15.0",
+    "torchmetrics>=1.9.0",
+    "matplotlib>=3.11.2",
+]
 
 [tool.setuptools_scm]
 
