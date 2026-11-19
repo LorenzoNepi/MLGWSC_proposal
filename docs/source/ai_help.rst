@@ -22,14 +22,11 @@ None of the (few) original ideas and implementation choices of the package come 
 as a reviewer or sanity check. Here are the most relevant Gemini contributions:
 
 - General revision, linting and debugging alongside tools like `ruff`, `pylint`, `pytest` and `mypy`;
-- Correction of the deprecated parts of the `dain.py` module to adapt the code from [DainRepo]_ to newer PyTorch
-versions;
-- Suggestions about RAM and VRAM usage (e.g. using `gc.collect()` before
-`torch.cuda.empty_cache()` to free the GPU VRAM );
-- Cells to automatically save training and inference results on GitHub
-in the `inference.ipynb` and `training.ipynb` notebooks;
+- Implementation of the `get_optimizer` funcion.
+- Correction of the deprecated parts of the `dain.py` module to adapt the code from [DainRepo]_ to newer PyTorch versions;
+- Suggestions about RAM and VRAM usage (e.g. using `gc.collect()` before `torch.cuda.empty_cache()` to free the GPU VRAM );
+- Cells to automatically save training and inference results on GitHub in the `inference.ipynb` and `training.ipynb` notebooks;
 - Fast docstring generation (alongside VS CODE auto-generated docstrings) for some of the less complex functions;
-- Help in writing the unit tests for `torch_segmentation()` and `fore_segmentation()` and for the `inference.py` module
-(e.g. usage of `tmp_path` and `capsys`);
+- Help in writing the unit tests for `torch_segmentation()` and `fore_segmentation()` and for the `inference.py` module (e.g. usage of `tmp_path` and `capsys`);
 - `uv` installation to speed up `nox` sessions;
 - README.md file generation.

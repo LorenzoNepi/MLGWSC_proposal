@@ -38,7 +38,8 @@ MLGWSC_proposal/
 │   ├── test_inference.py
 │   ├── test_resnet.py
 │   └── test_training.py
-├── pipeline.ipynb
+├── training_pipeline.ipynb         # Full training pipeline of a ResNet model
+├── inference_pipeline.ipynb        # Full pipeline for time of coalescence estimation from raw data
 ├── .gitignore
 ├── LICENSE
 ├── README.md
@@ -70,23 +71,22 @@ pip install -e ".[dev, docs]"
 
 ## Pipeline Workflow
 
-The `pipeline.ipynb` contains an example of a full pipeline, from raw HDF5 file to a trained ResNet-like model
-able to infer coalesce times.
+The `training_pipeline.ipynb` and `inference_pipeline.ipynb` contain an example of a full pipeline, from raw HDF5 file to a trained ResNet-like model able to infer coalesce times.
 
 ### 1. Data Preprocessing & Whitening
 Raw `H1` and `L1` strain timeseries (sampled at `2048 Hz`) are processed on GPU/CPU via `MLGWSC_proposal.data_manipulation`:
 * **Power Spectral Density (PSD):** Estimated per continuous block ($\ge 2\text{ h}$) using Welch's method with 50% overlapping Hann windows (`welch_psd`).
-* **Frequency-Domain Whitening:** Signals are transformed via `rfft`, high-pass filtered below the dataset `low_frequency_cutoff`, normalized by the Amplitude Spectral Density ($\sqrt{\text{PSD}}$), transformed back via `irfft`, and center-cropped to remove edge artifacts (`whiten`).
+* **Frequency-Domain Whitening:** Signals are transformed via PyTorch's `rfft`, high-pass filtered below the dataset `low_frequency_cutoff`, normalized by the Amplitude Spectral Density ($\sqrt{\text{PSD}}$), transformed back via `irfft`, and center-cropped to remove edge artifacts (`whiten`).
 * **Background & Foreground Extraction:** `torch_segmentation` extracts noise windows across continuous segments, while `foreground_segmentation` extracts windows around injected coalescence times ($t_c$) with randomized temporal offsets (`get_tc`) to avoid positional bias.
 
 ### 2. Curriculum Learning & Training
 `MLGWSC_proposal.dataloader` and `MLGWSC_proposal.training` manage model training:
 * **Curriculum Learning:** `Foreground_Dataset` orders injected signals by descending approximated SNR and progressively expands the training fraction (`snr_split`) over the first `cl_epochs` epochs.
 * **Architecture:** `GW_ResNet` supports configurable 1D ResNet depths (e.g., ResNet-34 with `BasicBlock` or ResNet-152 with bottleneck `Block`) and an optional `DAIN` normalization layer with differential learning rates.
-* **Optimization:** Trained with `BCEWithLogitsLoss`, `ReduceLROnPlateau` scheduling, and `EarlyStopping` checkpointing, followed by ROC-AUC and loss evaluation via `gw_resnet_test`.
+* **Optimization:** Trained with `BCEWithLogitsLoss`, `ReduceLROnPlateau` scheduling, and `EarlyStopping` checkpointing through the `train_gw_resnet` function, followed by ROC-AUC and loss evaluation via `gw_resnet_test`.
 
-### 3. Continuous Inference & MLGWSC-1 Submission
-`MLGWSC_proposal.inference` evaluates continuous strain files using a sliding window with step `stride / 4` (`0.25 s` for `1.0 s` windows):
+### 3. Continuous Inference & MLGWSC-1 ubmission standard
+`MLGWSC_proposal.inference` evaluates continuous strain files using a sliding window with step `stride // 4` (`0.25 s` for `1.0 s` windows):
 * Candidate triggers above `prob_threshold` are grouped via `cluster_detections`, retaining the peak probability timestamp per event cluster.
 * `mlgwsc1_output` exports the final triggers to an HDF5 file containing the three required 1D datasets of equal length: `time` (GPS coalescence timestamps), `stat` (ranking statistic / probability), and `var` (timing tolerance window in seconds).
 
