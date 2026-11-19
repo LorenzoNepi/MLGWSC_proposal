@@ -14,7 +14,7 @@ def model_inference(
     interval : float = 2.5,
     stride : float = 1.0,
     chunk_size : int = 1024,
-    batch_size : int = 64,
+    batch_size : int = 2048,
     prob_threshold : float = 0.5,
     cluster_window : float = 0.5
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -40,7 +40,7 @@ def model_inference(
     chunk_size : int, optional
         Number of segments processed per batch on GPU during whitening, by default 1024.
     batch_size : int, optional
-        Number of segments per batch during evaluation, by default 64.
+        Number of segments per batch during evaluation, by default 2048.
     prob_threshold : float, optional
         Minimum probability required to retain a candidate detection before clustering,
         by default 0.5.
