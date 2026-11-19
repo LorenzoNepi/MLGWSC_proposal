@@ -94,7 +94,7 @@ def welch_psd(
     num_windows = welch_segmented.shape[1]
     n_fr = interval_index // 2 + 1
     psd_sum = torch.zeros(
-        (2, n_fr), dtype=torch_segment.dtype, device=device)
+        (torch_segment.shape[0], n_fr), dtype = torch_segment.dtype, device = device)
 
     # Iterating over the chunks
     for i in range(0, num_windows, chunk_size):
@@ -208,7 +208,6 @@ def torch_segmentation(
     stride : float | int = 2.5,
     chunk_size : int = 512,
     max_intervals : int | None = None,
-    inference : bool = False
 ) -> None:
     """Divide the strain data into whitened, fixed-length segments.
 
@@ -221,8 +220,7 @@ def torch_segmentation(
     (total_duration - interval) // stride + 1
     - `stride * 2048` is the number of sampled points per timeseries (with a 2048 Hz
     sampling rate).
-    This procedure is used both for data processing before model inference and for generating
-    the background training dataset.
+    This procedure is used for generating the background training dataset.
 
     Parameters
     ----------
@@ -248,10 +246,6 @@ def torch_segmentation(
         for `max_intervals` is passed, a number of intervals proportional to
         each segment length is added to the output file in order to speed up the
         whitening process.
-    inference : bool = False | optional
-        When `torch_segmentation` is not used to segment background data, but for
-        inference (e.g. inside `MLGWSC_proposal.results.inference()`) ....
-        , by defualt False.
     """
 
     # Trying to use the GPU for the computations
@@ -274,7 +268,6 @@ def torch_segmentation(
 
     interval_index = round(interval_index)
     stride_index = round(stride_index)
-    step_index = stride_index // 4 if inference else stride_index # Used only for inference
 
     # Opening the input and output HDF5 files
     with (
@@ -288,9 +281,7 @@ def torch_segmentation(
         intervals_per_segment = []
         for key in H1:
             n_samples = H1[key].shape[0]
-            # Used step_index instead of stride_index just for inference (so the augmented
-            # number of segments won't be a problem).
-            intervals_per_segment.append(max(0, (n_samples - interval_index) // step_index + 1))
+            intervals_per_segment.append(max(0, (n_samples - interval_index) // stride_index + 1))
 
         total_intervals = sum(intervals_per_segment)
 
@@ -354,10 +345,8 @@ def torch_segmentation(
             # Shape: (2, len_segment) i.e. 2 channels
 
             # Divide in smaller intervals with stride (after checking if the integers are correct)
-            # Small difference in case of inference: divide in small intervals with a step of
-            # stride_index // 4 so that in the end we have 4 more segments to search for GWs
-            torch_segmented = torch_segment.unfold(1, interval_index, step_index)
-            # Shape: (2, #intervals, interval * 2048)
+            torch_segmented = torch_segment.unfold(1, interval_index, stride_index)
+            # Shape: (2, # intervals, interval_index)
 
             # Compute the psd on the full >=2h block
             psd = welch_psd(
@@ -697,12 +686,3 @@ def foreground_segmentation(
             snr_dset_new_dim = snr_dset_old_dim + len(snr_array)
             snr_dset.resize(snr_dset_new_dim, axis = 0)
             snr_dset[snr_dset_old_dim : ] = snr_array
-
-
-if __name__ == "__main__":
-    back_path = "/home/lorenzo02/MLGWSC_proposal/data/background.hdf"
-    fore_path = "/home/lorenzo02/MLGWSC_proposal/data/foreground.hdf"
-    inj_path = "/home/lorenzo02/MLGWSC_proposal/data/injections.hdf"
-    explore_data(back_path, fore_path, inj_path)
-    with h5py.File(fore_path, "r") as f:
-        print(np.array(f["H1"]["1238205077"][:10]))

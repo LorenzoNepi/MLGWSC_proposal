@@ -3,16 +3,14 @@ import gc
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 
-from MLGWSC_proposal.data_manipulation import torch_segmentation
+from MLGWSC_proposal.data_manipulation import welch_psd, whiten
 from MLGWSC_proposal.resnet import GW_ResNet
 
 
 def model_inference(
     model : GW_ResNet,
     ts_path : str,
-    segmented_ts_path : str,
     interval : float = 2.5,
     stride : float = 1.0,
     chunk_size : int = 1024,
@@ -20,7 +18,7 @@ def model_inference(
     prob_threshold : float = 0.5,
     cluster_window : float = 0.5
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Run `GW_ResNet` inference on continuous strain data.
+    """Run `GW_ResNet` inference on continuous strain data returning coalescence times.
 
     The input HDF5 timeseries is whitened and segmented using a sliding step equal to
     ``stride / 4``. Each window is evaluated by ``model``, positive candidates above
@@ -32,9 +30,7 @@ def model_inference(
     model : GW_ResNet
         Trained neural network model outputting raw classification logits.
     ts_path : str
-        Path to the input HDF5 file containing `H1` and `L1` strain datasets.
-    segmented_ts_path : str
-        Path where the intermediate whitened and segmented HDF5 file will be stored.
+        Path to the input HDF5 file containing raw `H1` and `L1` strain datasets.
     interval : float, optional
         Total interval (in seconds) used for PSD estimation and whitening,
         by default 2.5.
@@ -63,79 +59,107 @@ def model_inference(
         torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
     )
 
-    model.to(device)
+    # Checking if interval and stride values can be converted into valid indexes
+    interval_index = interval * 2048
+    stride_index = stride * 2048 # = points per whitened interval
 
-    # Segmenting data and saving it segmented_ts_path
-    torch_segmentation(
-        data_path = ts_path,
-        segmented_path = segmented_ts_path,
-        interval = interval,
-        stride = stride,
-        chunk_size = chunk_size,
-        max_intervals = None,
-        inference = True
-    )
+    if not (float(interval_index).is_integer() and float(stride_index).is_integer()):
+        raise ValueError("interval * sample_frequency and stride * sample_frequency "
+                         "must be int to get a valid index")
 
-    # We could have just computed the times list as
-    # times = np.array([start_time + a * stride for a in range(data_whitened.shape[1])])
-    # but to be more precise we can compute it like this:
-    stride_index = round(stride * 2048)
-    interval_index = round(interval * 2048)
-    step_index = stride_index // 4
+    interval_index = round(interval_index)
+    stride_index = round(stride_index)
+    step_index = stride_index//4 # Used only for inference
     step = step_index / 2048
 
-    times = np.array([])
-    with h5py.File(ts_path, "r") as f:
-        for key in f["H1"]:
-            #* Number of whitened intervals per >2h segment
-            n_seg = (f["H1"][key].shape[0] - interval_index) // step_index + 1
-            segment_times_list = float(key) + (interval - stride) / 2 + np.arange(n_seg) * step
-            times = np.concatenate((times, segment_times_list))
+    model.to(device)
 
     # Evaluating all the segments
     model.eval()
-    logits = []
-
-    # Recovering segmented strain data from the HDF5 files
-    with h5py.File(segmented_ts_path, "r") as f:
-        # Shape (2, # segments, stride * 2048)
-        data_whitened = np.array(f["whitened"][()])
-
-    # Reordering to shape (batch, channel, lenght) = (# segments, 2, stride * 2048)
-    data_whitened = torch.from_numpy(data_whitened)
-    data_whitened = data_whitened.permute(1, 0, 2)
-
-    # Creating the dataloader
-    inference_loader  = DataLoader(
-        TensorDataset(data_whitened), batch_size = batch_size, shuffle = False, pin_memory=True
-    )
-
-    # Evaluating all the segments
-
     all_probs = []
-    with torch.inference_mode():
-        for (a,) in inference_loader:
-            a = a.to(device, non_blocking=True)
-            logits = model(a)
+    times = []
 
-            # Computing the probability that each segment contains a signal
-            probs = torch.sigmoid(logits).view(-1)
-            all_probs.extend(probs.cpu().tolist())
+    # Opening the input HDF5 file
+    with h5py.File(ts_path, "r") as f_in:
 
+        H1, L1 = f_in["H1"], f_in["L1"]
+
+        for key in H1:
+            #* Number of whitened intervals per >2h segment
+            # We could have just computed the times list as
+            # times = np.array([start_time + a * stride for a in range(data_whitened.shape[1])])
+            # but to be more precise we can compute it like this:
+            n_seg = (H1[key].shape[0] - interval_index) // step_index + 1
+            segment_times_list = float(key) + (interval - stride) / 2 + np.arange(n_seg) * step
+            times.extend(segment_times_list)
+
+            # Segmenting the data
+            L_torch_segment = torch.as_tensor(
+                L1[key][()], dtype=torch.float32, device=device) * 1e21
+            H_torch_segment = torch.as_tensor(
+                H1[key][()], dtype=torch.float32, device=device) * 1e21
+
+            torch_segment = torch.stack([L_torch_segment, H_torch_segment], dim=0)
+            # Shape: (2, len_segment) i.e. 2 channels
+
+            torch_segmented = torch_segment.unfold(1, interval_index, step_index)
+            # Shape: (2, #intervals, interval_index)
+
+            # Compute the psd on the full >=2h block
+            psd = welch_psd(
+                torch_segment, interval_index, device = device, chunk_size = chunk_size
+            )
+
+            # Apply whitening only on the subsampled intervals
+            torch_whitened = whiten(torch_segmented,
+                                    interval, psd,
+                                    device = device,
+                                    hz_cutoff = round(f_in.attrs["low_frequency_cutoff"]),
+                                    chunk_size = chunk_size)
+
+            # Crop borders so that the small segments' length is exactly stride * 2048
+            cut_index = (interval_index - stride_index) // 2
+            torch_whitened = torch_whitened[: , : , cut_index : -cut_index]
+
+            # Reordering to shape (batch, channel, length) = (# segments, 2, stride * 2048)
+            torch_whitened = torch_whitened.permute(1, 0, 2)
+
+            # Evaluating all the segments directly on GPU
+            # (batching by hand, DataLoaders and Dataset would introduce a useless overhead)
+            with torch.inference_mode():
+                for start in range(0, torch_whitened.shape[0], batch_size):
+                    batch = torch_whitened[start : start + batch_size]
+                    # Computing the probability that each segment contains a signal
+                    logits = model(batch)
+                    probs = torch.sigmoid(logits).view(-1)
+                    all_probs.extend(probs.cpu().tolist())
+
+            # Freeing GPU memory
+            del (
+                L_torch_segment,
+                H_torch_segment,
+                torch_segment,
+                torch_segmented,
+                torch_whitened,
+                batch,
+                psd
+                )
+
+            gc.collect()
+            torch.cuda.empty_cache()
+
+    times = np.array(times)
     all_probs = np.array(all_probs)
     # Generating a mask for signal segments
     mask = all_probs > prob_threshold
     signal_times = times[mask]
     signal_probs = all_probs[mask]
 
-    # Freeing GPU memory just to be sure
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    selected_times, selected_probs = cluster_detections(signal_times = signal_times,
-                       signal_probs = signal_probs,
-                       cluster_window = cluster_window
-    )
+    selected_times, selected_probs = cluster_detections(
+        signal_times = signal_times,
+        signal_probs = signal_probs,
+        cluster_window = cluster_window
+        )
 
     return selected_times, selected_probs
 

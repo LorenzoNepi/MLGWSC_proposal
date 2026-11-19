@@ -84,7 +84,6 @@ def test_mlgwsc1_output(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[st
 
 def test_model_inference(tmp_path: pathlib.Path) -> None:
     ts_path = tmp_path / "raw_test_strain.hdf"
-    segmented_ts_path = tmp_path / "segmented_test_strain.hdf"
 
     # Creating two discontinuous 10s strain blocks at 2048 Hz to test multi-key handling
     rng = np.random.default_rng(seed=42)
@@ -136,7 +135,6 @@ def test_model_inference(tmp_path: pathlib.Path) -> None:
     selected_times, selected_probs = model_inference(
         model=model,
         ts_path=str(ts_path),
-        segmented_ts_path=str(segmented_ts_path),
         interval=interval,
         stride=stride,
         chunk_size=16,
@@ -145,7 +143,6 @@ def test_model_inference(tmp_path: pathlib.Path) -> None:
         cluster_window=0.5,
     )
 
-    assert segmented_ts_path.exists()
     assert isinstance(selected_times, np.ndarray)
     assert isinstance(selected_probs, np.ndarray)
     assert selected_times.shape == selected_probs.shape == (1,)

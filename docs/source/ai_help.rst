@@ -29,6 +29,7 @@ versions;
 - Cells to automatically save training and inference results on GitHub
 in the `inference.ipynb` and `training.ipynb` notebooks;
 - Fast docstring generation (alongside VS CODE auto-generated docstrings) for some of the less complex functions;
-- Help in writing the unit tests for `torch_segmentation()` and `fore_segmentation()` and the `inference.py` module
+- Help in writing the unit tests for `torch_segmentation()` and `fore_segmentation()` and for the `inference.py` module
 (e.g. usage of `tmp_path` and `capsys`);
-- `uv` installation to speed up `nox` sessions.
+- `uv` installation to speed up `nox` sessions;
+- README.md file generation.
