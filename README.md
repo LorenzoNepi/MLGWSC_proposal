@@ -54,7 +54,7 @@ MLGWSC_proposal/
 Clone the repository and install the package in editable mode (requires **Python >= 3.12**):
 
 ```bash
-git clone [https://github.com/LorenzoNepi/MLGWSC_proposal.git](https://github.com/LorenzoNepi/MLGWSC_proposal.git)
+git clone https://github.com/LorenzoNepi/MLGWSC_proposal.git
 cd MLGWSC_proposal
 python -m venv .venv
 source .venv/bin/activate
@@ -95,16 +95,16 @@ Raw `H1` and `L1` strain timeseries (sampled at `2048 Hz`) are processed on GPU/
 ## References
 
 * M.B. Schäfer, O. Zelenka et al. (2022), *MLGWSC-1: The first Machine Learning Gravitational-Wave Search Mock Data Challenge*, arXiv:2209.11146.
-* GitHub page for [https://github.com/gwastro/ml-mock-data-challenge-1](MLGWSC-1).
+* GitHub page for [MLGWSC-1](https://github.com/gwastro/ml-mock-data-challenge-1).
 * P. Nousi et al. (2023), *Deep Residual Networks for Gravitational Wave Detection*, arXiv:2211.01520.
 * K. He, X. Zhang, S. Ren, & J. Sun (2016), *Deep Residual Learning for Image Recognition*, arXiv:1512.03385.
 * N. Passalis, et al. (2019), *Deep Adaptive Input Normalization for Time Series Forecasting*, arXiv:1902.07892.
-* GitHub page for the original [https://github.com/passalis/dain](DAIN) code.
+* GitHub page for the original [DAIN](https://github.com/passalis/dain) code.
 
 ---
 
 ## License and documentation
 
-The full documentation can be found at the following page: [https://lorenzonepi.github.io/MLGWSC_proposal/](Docs).
+The full documentation can be found at the following page: [DOCS](https://lorenzonepi.github.io/MLGWSC_proposal/).
 
 This project is released under the terms specified in the [LICENSE](LICENSE) file.

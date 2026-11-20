@@ -45,7 +45,7 @@ def model_inference(
         Minimum probability required to retain a candidate detection before clustering,
         by default 0.5.
     cluster_window : float, optional
-        Maximum time separation (in seconds) between consecutive detections merged into the
+        Maximum time separation (in seconds) between consecutive detections "merged" into the
         same event cluster, by default 0.5.
     Returns
     -------
@@ -161,24 +161,37 @@ def model_inference(
         cluster_window = cluster_window
         )
 
-    return selected_times, selected_probs
+    # Selected times returns the starting times of the segments, so in order
+    # to get the central time we can sum stride / 2 to the selected times
+    return selected_times + stride/2, selected_probs
 
 def cluster_detections(
     signal_times: np.ndarray,
     signal_probs: np.ndarray,
     cluster_window: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Group consecutive trigger timestamps within ``cluster_window`` seconds and keep the peak.
+    """Group consecutive trigger timestamps within `cluster_window` from a peak.
+
+    Triggers are processed in descending order of probability: each surviving
+    local peak suppresses all weaker triggers falling within
+    `[t_peak - cluster_window, t_peak + cluster_window]`.
 
     Parameters
     ----------
     signal_times : np.ndarray
         1D array of GPS timestamps corresponding to candidate detections.
     signal_probs : np.ndarray
-        1D array of detection probabilities associated with ``signal_times``.
+        1D array of detection probabilities associated with `signal_times`.
     cluster_window : float, optional
         Maximum time gap (in seconds) between consecutive triggers belonging to the same cluster.
         Default is 0.5.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        A tuple ``(clustered_times, clustered_probs)`` sorted in ascending
+        chronological order, containing the timestamps and probabilities of
+        the surviving peaks.
     """
     if len(signal_times) == 0:
         return np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float32)
@@ -188,32 +201,31 @@ def cluster_detections(
     times = signal_times[order]
     probs = signal_probs[order]
 
-    # Splitting into clusters wherever the gap between two consecutive triggers
-    # exceeds cluster_window:
-    # - np.diff computes the difference between each time and the previous one (len - 1)
-    # - np.flatnonzero returns indexes where mask np.diff(times) > cluster_window is True
-    # - + 1 converts the mask in the start index for each cluster
-    split_indices = np.flatnonzero(np.diff(times) > cluster_window) + 1
+    # Mask for refused signals to check during the for cycle
+    suppressed = np.zeros(len(signal_probs), dtype = bool)
+    # List of indexes of the peaks
+    keep = []
 
-    # Completing the clusters: concateneting 0 in the beginning and len(times) in the end.
-    # Now we have two arrays like
-    # cluster_starts = [0, start_cluster2, start_cluster3, ...]
-    # cluster_ends = [end_cluster1, end_cluster2, ..., len(times)]
-    # where end_cluster1 == start_cluster2
-    cluster_starts = np.concatenate((np.array([0]), split_indices))
-    cluster_ends = np.concatenate((split_indices, np.array([len(times)])))
+    # np.ndarray of indexes from most to less probable signal
+    signal_order =  np.argsort(probs)[::-1]
 
-    # Memory space for the output arrays
-    selected_times = np.empty(len(cluster_starts), dtype=times.dtype)
-    selected_probs = np.empty(len(cluster_starts), dtype=probs.dtype)
+    for i in signal_order:
+        if suppressed[i]: # Skipping a signal if it has already been suppressed
+            continue
+        keep.append(i) # Keeping the signal (safe since we are going from high to low probability)
+        t_peak = times[i]
+        # Find the indexes of the window
+        # From the docs of np.searchsorted: Find the indices into a sorted array a such that, if
+        # the corresponding elements in v were inserted before the indices, the order of a
+        # would be preserved.
+        left_index = np.searchsorted(times, t_peak - cluster_window, side = "left")
+        right_index = np.searchsorted(times, t_peak + cluster_window, side = "right")
+        suppressed[left_index : right_index] = True
 
-    # Finding the position of the peak and selecting the right times
-    for idx, (start, end) in enumerate(zip(cluster_starts, cluster_ends, strict = True)):
-        best_local = int(np.argmax(probs[start:end]))
-        selected_times[idx] = times[start + best_local]
-        selected_probs[idx] = probs[start + best_local]
+    keep = np.sort(keep)
 
-    return selected_times, selected_probs
+    return times[keep], probs[keep]
+
 
 def mlgwsc1_output(
     selected_times: np.ndarray,
