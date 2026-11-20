@@ -153,5 +153,5 @@ def test_model_inference(tmp_path: pathlib.Path) -> None:
     assert isinstance(selected_times, np.ndarray)
     assert isinstance(selected_probs, np.ndarray)
     assert selected_times.shape == selected_probs.shape == (6,)
-    assert np.allclose(selected_times, expected_times)
+    assert np.allclose(selected_times - stride / 2, expected_times)
     assert np.allclose(selected_probs, expected_probs, atol=1e-6)

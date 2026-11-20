@@ -45,7 +45,7 @@ def model_inference(
         Minimum probability required to retain a candidate detection before clustering,
         by default 0.5.
     cluster_window : float, optional
-        Maximum time separation (in seconds) between consecutive detections merged into the
+        Maximum time separation (in seconds) between consecutive detections "merged" into the
         same event cluster, by default 0.5.
     Returns
     -------
@@ -161,7 +161,9 @@ def model_inference(
         cluster_window = cluster_window
         )
 
-    return selected_times, selected_probs
+    # Selected times returns the starting times of the segments, so in order
+    # to get the central time we can sum stride / 2 to the selected times
+    return selected_times + stride/2, selected_probs
 
 def cluster_detections(
     signal_times: np.ndarray,
