@@ -129,9 +129,10 @@ def test_model_inference(tmp_path: pathlib.Path) -> None:
     stride = 1.0
     # With duration=10s, interval=2.5s, step=0.25s:
     # n_seg per block = (10*2048 - 2.5*2048) // (0.25*2048) + 1 = 31 segments -> 62 total segments.
-    # Indices > 45 correspond to segment indices 46..61 (all inside the second block gps_2,
-    # local indices 15..30), which form a single continuous cluster with
-    # step 0.25s <= cluster_window 0.5s.
+    # Indices > 45 correspond to global indices 46..61 (local indices 15..30 in gps_2).
+    # With monotonically increasing probabilities, step=0.25s, and cluster_window=0.5s,
+    # NMS keeps every 3rd segment starting from the highest peak (local index 30):
+    # local indices [15, 18, 21, 24, 27, 30] -> 6 distinct events.
     selected_times, selected_probs = model_inference(
         model=model,
         ts_path=str(ts_path),
@@ -143,11 +144,14 @@ def test_model_inference(tmp_path: pathlib.Path) -> None:
         cluster_window=0.5,
     )
 
+    expected_local_indices = np.array([15, 18, 21, 24, 27, 30])
+    expected_times = float(gps_2) + (interval - stride) / 2 + expected_local_indices * (stride / 4)
+    expected_global_indices = 31 + expected_local_indices
+    expected_logits = (expected_global_indices - 45.0) * 0.2
+    expected_probs = 1.0 / (1.0 + np.exp(-expected_logits))
+
     assert isinstance(selected_times, np.ndarray)
     assert isinstance(selected_probs, np.ndarray)
-    assert selected_times.shape == selected_probs.shape == (1,)
-
-    # Peak probability occurs at the last segment (global index 61 -> local index 30 in gps_2)
-    expected_peak_time = float(gps_2) + (interval - stride) / 2 + 30 * (stride / 4)
-    assert np.isclose(selected_times[0], expected_peak_time)
-    assert 0.5 < selected_probs[0] <= 1.0
+    assert selected_times.shape == selected_probs.shape == (6,)
+    assert np.allclose(selected_times, expected_times)
+    assert np.allclose(selected_probs, expected_probs, atol=1e-6)
