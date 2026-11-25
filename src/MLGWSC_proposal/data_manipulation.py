@@ -316,7 +316,7 @@ def torch_segmentation(
         dset = f_out["whitened"]
 
         # Iterating on every timeseries in the input HDF5 files (at least 2 hours of strain data)
-        for key, quota in zip(L1, quotas, strict = True):
+        for key, quota in zip(H1, quotas, strict = True):
             if quota == 0: # Should not happen, but just in case
                 continue
 

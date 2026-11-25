@@ -444,40 +444,6 @@ class ResNet(nn.Module): # For ResNet152: stages = [3, 8, 36, 3]
         # shape of x : (batch_size, num_classes)
         return x
 
-class GW_ResNet152(nn.Module):
-    """Hybrid 1D ResNet-152 architecture with Deep Adaptive Input Normalization (DAIN).
-
-    Combines an adaptive normalization preprocessing layer (`DAIN_Layer`) with a
-    152-layer 1D Residual Network backbone (`stages = [3, 8, 36, 3]`) for binary
-    classification of gravitational-wave strain time-series.
-
-    Parameters
-    ----------
-    base_width : int, optional
-        Base channel width of the ResNet152 backbone, by default 32. Using 32
-        instead of 64 (as originally done in the first ResNet implementations)
-        preserves the full 152-layer depth while reducing parameter count by
-        ~4x to prevent overfitting on 1D strain data.
-    dropout : float, optional
-        Dropout probability before the final classification layer, by default 0.5.
-    """
-    def __init__(self, base_width : int = 32, dropout : float = 0.5) -> None:
-        super().__init__()
-        self.dain = DAIN_Layer(mode = "full", input_dim = 2)
-        # DAIN_layer does not modify the shape of the input tensor
-        self.resnet = ResNet(
-            stages = [3, 8, 36, 3],
-            input_channels = 2,
-            num_classes = 1,
-            base_width = base_width,
-            dropout = dropout
-        )
-
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
-        x = self.dain(x)
-        x = self.resnet(x)
-        return x
-
 class GW_ResNet(nn.Module):
     """Configurable 1D ResNet architecture with optional Deep Adaptive Input Normalization (DAIN).
 
